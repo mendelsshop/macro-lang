@@ -39,7 +39,7 @@ trait AdjustScope: Sized {
 
     fn flip_scope(self, other_scope: Scope) -> Self {
         self.adjust_scope(other_scope, |mut scopes, other_scope| {
-            if scopes.remove(&other_scope) {
+            if !scopes.remove(&other_scope) {
                 scopes.insert(other_scope);
             }
             scopes
@@ -114,7 +114,7 @@ impl AdjustScope for Ast {
 mod tests {
     use std::collections::HashSet;
 
-    use crate::{Ast, Scope, ScopeCreator, Syntax};
+    use crate::{AdjustScope, Ast, Scope, ScopeCreator, Syntax};
 
     #[test]
     fn identifier_test_with_empty_syntax() {
@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn scope_equality() {
+    fn scope_equality_test() {
         let mut scope_creator = ScopeCreator::new();
         let sc1 = scope_creator.new_scope();
         let sc2 = scope_creator.new_scope();
@@ -206,7 +206,73 @@ mod tests {
         assert_eq!(sc2, sc2)
     }
 
-    // TODO: scope adjustment tests
+    #[test]
+    fn add_scope_test_empty_scope() {
+        let mut scope_creator = ScopeCreator::new();
+        let sc1 = scope_creator.new_scope();
+        assert_eq!(
+            Ast::Syntax(Syntax("x".into(), HashSet::new())).add_scope(sc1),
+            Ast::Syntax(Syntax("x".into(), HashSet::from([sc1])))
+        );
+    }
+
+    #[test]
+    fn add_scope_test_empty_scope_list() {
+        let mut scope_creator = ScopeCreator::new();
+        let sc1 = scope_creator.new_scope();
+        assert_eq!(
+            Ast::List(vec![Ast::Symbol("x".into()), Ast::Symbol("y".into()),])
+                .datum_to_syntax()
+                .add_scope(sc1),
+            Ast::List(vec![
+                Ast::Syntax(Syntax("x".into(), HashSet::from([sc1]))),
+                Ast::Syntax(Syntax("y".into(), HashSet::from([sc1]))),
+            ])
+        );
+    }
+
+    #[test]
+    fn add_scope_test_non_empty_scope() {
+        let mut scope_creator = ScopeCreator::new();
+        let sc1 = scope_creator.new_scope();
+        let sc2 = scope_creator.new_scope();
+        assert_eq!(
+            Ast::Syntax(Syntax("x".into(), HashSet::from([sc1]))).add_scope(sc2),
+            Ast::Syntax(Syntax("x".into(), HashSet::from([sc1, sc2])))
+        );
+    }
+
+    #[test]
+    fn add_scope_test_add_duplicate() {
+        let mut scope_creator = ScopeCreator::new();
+        let sc1 = scope_creator.new_scope();
+        assert_eq!(
+            Ast::Syntax(Syntax("x".into(), HashSet::from([sc1]))).add_scope(sc1),
+            Ast::Syntax(Syntax("x".into(), HashSet::from([sc1,])))
+        );
+    }
+
+    #[test]
+    fn flip_scope_test_different() {
+        let mut scope_creator = ScopeCreator::new();
+        let sc1 = scope_creator.new_scope();
+        let sc2 = scope_creator.new_scope();
+        assert_eq!(
+            Ast::Syntax(Syntax("x".into(), HashSet::from([sc1]))).flip_scope(sc2),
+            Ast::Syntax(Syntax("x".into(), HashSet::from([sc1, sc2])))
+        );
+    }
+
+    #[test]
+    fn flip_scope_test_same() {
+        let mut scope_creator = ScopeCreator::new();
+        let sc1 = scope_creator.new_scope();
+        let sc2 = scope_creator.new_scope();
+        assert_eq!(
+            Ast::Syntax(Syntax("x".into(), HashSet::from([sc1, sc2]))).flip_scope(sc2),
+            Ast::Syntax(Syntax("x".into(), HashSet::from([sc1,])))
+        );
+    }
 }
 
 fn main() {
