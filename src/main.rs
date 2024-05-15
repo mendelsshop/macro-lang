@@ -2,10 +2,9 @@
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
 use core::panic;
 use std::collections::HashMap;
-use std::fmt;
+use std::fmt::{self, Debug};
+use std::{cell::RefCell, cmp::Ordering};
 use std::{collections::BTreeSet, rc::Rc};
-
-type Ident = Rc<str>;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 struct Scope(usize);
@@ -26,7 +25,7 @@ impl ScopeCreator {
 
 type ScopeSet = BTreeSet<Scope>;
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
-struct Syntax(Ident, ScopeSet);
+pub struct Syntax(Symbol, ScopeSet);
 
 trait AdjustScope: Sized {
     fn adjust_scope(
@@ -53,7 +52,7 @@ trait AdjustScope: Sized {
 }
 
 impl Syntax {
-    fn new(symbol: Rc<str>) -> Self {
+    #[must_use] pub fn new(symbol: Symbol) -> Self {
         Self(symbol, BTreeSet::new())
     }
 }
@@ -68,27 +67,84 @@ impl AdjustScope for Syntax {
     }
 }
 
+pub type AnalyzedResult = Result<Box<dyn AnalyzeFn>, String>;
+pub trait AnalyzeFn: Fn(EnvRef) -> Result<Ast, String> {
+    fn clone_box<'a>(&self) -> Box<dyn 'a + AnalyzeFn>
+    where
+        Self: 'a;
+}
+
+impl<F> AnalyzeFn for F
+where
+    F: Fn(EnvRef) -> Result<Ast, String> + Clone,
+{
+    fn clone_box<'a>(&self) -> Box<dyn 'a + AnalyzeFn>
+    where
+        Self: 'a,
+    {
+        Box::new(self.clone())
+    }
+}
+impl<'a> Clone for Box<dyn 'a + AnalyzeFn> {
+    fn clone(&self) -> Self {
+        (**self).clone_box()
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
-enum Ast {
+pub enum Function {
+    Lambda(Lambda),
+    Primitive(Primitive),
+}
+
+impl Function {
+    fn apply(&self, args: Vec<Ast>) -> Result<Ast, String> {
+        match self {
+            Self::Lambda(Lambda(body, env, params)) => {
+                let env = Env::extend_envoirnment(env.clone(), params, args)?;
+                body(env)
+            }
+            Self::Primitive(p) => p(args),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Lambda(Box<dyn AnalyzeFn>, EnvRef, Vec<Symbol>);
+
+impl PartialEq for Lambda {
+    fn eq(&self, _other: &Self) -> bool {
+        false
+    }
+}
+impl fmt::Debug for Lambda {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(procedure)")
+    }
+}
+type Primitive = fn(Vec<Ast>) -> Result<Ast, String>;
+#[derive(Clone, PartialEq, Debug)]
+pub enum Ast {
     List(Vec<Ast>),
     Syntax(Syntax),
     Number(f64),
     Symbol(Symbol),
+    Function(Function),
 }
 
 impl Ast {
-    fn datum_to_syntax(self) -> Self {
+    pub fn datum_to_syntax(self) -> Self {
         match self {
             Self::List(l) => Self::List(l.into_iter().map(Self::datum_to_syntax).collect()),
             Self::Syntax(_) => self,
-            Self::Symbol(Symbol(s, _)) => Self::Syntax(Syntax::new(s)),
+            Self::Symbol(s) => Self::Syntax(Syntax::new(s)),
             _ => self,
         }
     }
     fn syntax_to_datum(self) -> Self {
         match self {
             Self::List(l) => Self::List(l.into_iter().map(Self::syntax_to_datum).collect()),
-            Self::Syntax(Syntax(s, _)) => Self::Symbol(Symbol(s, 0)),
+            Self::Syntax(Syntax(s, _)) => Self::Symbol(s),
             _ => self,
         }
     }
@@ -183,7 +239,15 @@ impl Expander<Binding> {
             Binding::Quote,
             Binding::QuoteSyntax,
         ]);
-        let core_primitives = BTreeSet::from([]);
+        let core_primitives = BTreeSet::from([
+            Binding::Variable("datum->syntax".into()),
+            Binding::Variable("syntax->datum".into()),
+            Binding::Variable("list".into()),
+            Binding::Variable("cons".into()),
+            Binding::Variable("car".into()),
+            Binding::Variable("cdr".into()),
+            Binding::Variable("map".into()),
+        ]);
         let mut this = Self {
             scope_creator,
             core_scope,
@@ -197,7 +261,10 @@ impl Expander<Binding> {
             .union(&this.core_primitives.clone())
             .for_each(|core| {
                 this.add_binding(
-                    Syntax(core.to_string().into(), BTreeSet::from([this.core_scope])),
+                    Syntax(
+                        Symbol(core.to_string().into(), 0),
+                        BTreeSet::from([this.core_scope]),
+                    ),
                     core.clone(),
                 );
             });
@@ -208,7 +275,8 @@ impl Expander<Binding> {
     }
 
     fn add_local_binding(&mut self, id: Syntax) -> Symbol {
-        let symbol = Symbol(id.0.clone(), self.symbol_count);
+        let symbol = Symbol(id.0 .0.clone(), self.symbol_count);
+        self.symbol_count += 1;
         self.add_binding(id, Binding::Variable(symbol.clone()));
         symbol
     }
@@ -231,7 +299,7 @@ impl Expander<Binding> {
             .filter(move |c_id| c_id.0 == id.0 && c_id.1.is_subset(&id.1))
     }
 
-    fn introduce<T: AdjustScope>(&self, s: T) -> T {
+    pub fn introduce<T: AdjustScope>(&self, s: T) -> T {
         s.add_scope(self.core_scope)
     }
 
@@ -244,6 +312,7 @@ impl Expander<Binding> {
             Ast::Number(_) => todo!(),
             Ast::Symbol(_) => todo!(),
             Ast::List(_) => todo!(),
+            Ast::Function(_) => todo!(),
         }
     }
 
@@ -292,7 +361,10 @@ impl Expander<Binding> {
                     .ok_or(format!("out of context {}", binding.0))?;
                 match v {
                     CompileTimeBinding::Symbol(_) => self.expand_app(s, env),
-                    CompileTimeBinding::Macro => todo!(),
+                    CompileTimeBinding::Macro(m) => {
+                        let apply_transformer = self.apply_transformer(m, Ast::List(s));
+                        self.expand(apply_transformer?, env)
+                    }
                 }
             }
         }
@@ -346,7 +418,7 @@ impl Expander<Binding> {
     fn eval_for_syntax_binding(&mut self, rhs: Ast) -> Result<CompileTimeBinding, String> {
         let var_name = format!("problem `evaluating` macro {rhs:?}");
         let expand = self.expand(rhs, CompileTimeEnvoirnment::new());
-        Ok(self.eval_compiled(self.compile(expand?).ok_or(var_name)?))
+        self.eval_compiled(self.compile(expand?).ok_or(var_name)?)
     }
 
     fn compile(&self, rhs: Ast) -> Option<Ast> {
@@ -409,21 +481,227 @@ impl Expander<Binding> {
             }
             Ast::Number(_) => Some(rhs),
             Ast::Symbol(_) => todo!(),
+            Ast::Function(_) => todo!(),
         }
     }
 
-    fn eval_compiled(&self, new: Ast) -> CompileTimeBinding {
-        todo!()
+    fn eval_compiled(&self, new: Ast) -> Result<CompileTimeBinding, String> {
+        let env = Env::new();
+        env.borrow_mut().define(
+            Symbol("datum->syntax".into(), 0),
+            Ast::Function(Function::Primitive(move |e| {
+                let [e] = &e[..] else {
+                    Err(format!("arity error: expected 1 argument, got {}", e.len()))?
+                };
+                Ok(e.clone().datum_to_syntax())
+            })),
+        );
+        env.borrow_mut().define(
+            Symbol("syntax->datum".into(), 0),
+            Ast::Function(Function::Primitive(move |e| {
+                let [e] = &e[..] else {
+                    Err(format!("arity error: expected 1 argument, got {}", e.len()))?
+                };
+                Ok(e.clone().syntax_to_datum())
+            })),
+        );
+        env.borrow_mut().define(
+            Symbol("syntax-e".into(), 0),
+            Ast::Function(Function::Primitive(move |e| {
+                let [Ast::Syntax(Syntax(e, _))] = &e[..] else {
+                    Err(format!("arity error: expected 1 argument, got {}", e.len()))?
+                };
+                Ok(Ast::Symbol(e.clone()))
+            })),
+        );
+        Evaluator::eval(new, env).and_then(|e| {
+            if let Ast::Function(f) = e {
+                Ok(CompileTimeBinding::Macro(f))
+            } else {
+                Err(format!("{e:?} is not a macro"))
+            }
+        })
+    }
+
+    fn apply_transformer(&mut self, m: Function, s: Ast) -> Result<Ast, String> {
+        let intro_scope = self.scope_creator.new_scope();
+        let intro_s = s.add_scope(intro_scope);
+        let transformed_s = m.apply(vec![intro_s])?;
+
+        Ok(transformed_s.flip_scope(intro_scope))
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct Env {
+    scope: HashMap<Symbol, Ast>,
+    parent: Option<EnvRef>,
+}
+
+impl Env {
+    fn lookup(&self, symbol: &Symbol) -> Option<Ast> {
+        self.scope.get(symbol).cloned().or_else(|| {
+            self.parent
+                .as_ref()
+                .and_then(|parent| parent.borrow().lookup(symbol))
+        })
+    }
+    fn set(&mut self, symbol: Symbol, mut expr: Ast) -> Option<Ast> {
+        {
+            match self.scope.get_mut(&symbol) {
+                Some(s) => {
+                    std::mem::swap(s, &mut expr);
+                    Some(expr)
+                }
+                None => self
+                    .parent
+                    .as_ref()
+                    .and_then(|parent| parent.borrow_mut().set(symbol, expr)),
+            }
+        }
+    }
+    fn define(&mut self, symbol: Symbol, expr: Ast) -> bool {
+        self.scope.insert(symbol, expr).is_some()
+    }
+    fn new_scope(env: EnvRef) -> EnvRef {
+        let parent = Some(env);
+        let scope = HashMap::new();
+        Rc::new(RefCell::new(Self { scope, parent }))
+    }
+
+    fn extend_envoirnment(
+        env: EnvRef,
+        params: &[Symbol],
+        args: Vec<Ast>,
+    ) -> Result<EnvRef, String> {
+        let new_envoirnment = Self::new_scope(env);
+        match params.len().cmp(&args.len()) {
+            Ordering::Less => Err("arity error to many arguments passed in".to_string()),
+            Ordering::Greater => Err("arity error to little arguments passed in".to_string()),
+            Ordering::Equal => {
+                for (param, arg) in params.iter().zip(args.into_iter()) {
+                    new_envoirnment.borrow_mut().define(param.clone(), arg);
+                }
+                Ok(new_envoirnment)
+            }
+        }
+    }
+
+    fn new() -> EnvRef {
+        let scope = HashMap::new();
+        // TODO: primitive environment
+        let parent = None;
+        Rc::new(RefCell::new(Self { scope, parent }))
+    }
+}
+
+type EnvRef = Rc<RefCell<Env>>;
+
+pub struct Evaluator {}
+
+impl Evaluator {
+    fn eval(expr: Ast, env: EnvRef) -> Result<Ast, String> {
+        Self::analyze(expr)?(env)
+    }
+    fn analyze(expr: Ast) -> AnalyzedResult {
+        match expr {
+            Ast::List(list) => match list.first() {
+                Some(Ast::Symbol(Symbol(lambda, 0))) if **lambda == *"lambda" => {
+                    let mut list = list.clone().into_iter();
+                    let (Some(Ast::List(arg)), Some(body), None) =
+                        (list.next(), list.next(), list.next())
+                    else {
+                        Err(format!("bad syntax {list:?}"))?
+                    };
+                    let args = arg
+                        .into_iter()
+                        .map(|arg| {
+                            if let Ast::Symbol(s) = arg {
+                                Ok(s)
+                            } else {
+                                Err(format!("bad syntax {arg:?} is not a valid paramter"))
+                            }
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let body = Self::analyze(body)?;
+                    Ok(Box::new(move |env| {
+                        Ok(Ast::Function(Function::Lambda(Lambda(
+                            body.clone(),
+                            env,
+                            args.clone(),
+                        ))))
+                    }))
+                }
+                Some(Ast::Symbol(Symbol(quote, 0))) if **quote == *"quote" => {
+                    if list.len() == 2 {
+                        Ok(Box::new(move |_| Ok(list[1].clone())))
+                    } else {
+                        Err(format!("bad syntax {list:?}"))
+                    }
+                }
+                Some(f) => {
+                    let f = Self::analyze(f.clone())?;
+                    let rest = list[1..]
+                        .iter()
+                        .cloned()
+                        .map(Self::analyze)
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(Box::new(move |env| {
+                        Self::execute_application(
+                            f.clone()(env.clone())?,
+                            rest.clone()
+                                .into_iter()
+                                .map(|a| a(env.clone()))
+                                .collect::<Result<Vec<_>, _>>()?,
+                        )
+                    }))
+                }
+                None => Err(format!("bad syntax {list:?}")),
+            },
+            Ast::Symbol(s) => Ok(Box::new(move |env| {
+                env.borrow()
+                    .lookup(&s)
+                    .ok_or(format!("free variable {s:?}"))
+            })),
+            _ => Ok(Box::new(move |_| Ok(expr.clone()))),
+        }
+    }
+
+    fn execute_application(f: Ast, args: Vec<Ast>) -> Result<Ast, String> {
+        if let Ast::Function(f) = f {
+            f.apply(args)
+        } else {
+            Err(format!(
+                "cannot not apply {f:?} to {args:?}, because {f:?} is not a function"
+            ))
+        }
     }
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Symbol(pub Rc<str>, pub usize);
 
+impl fmt::Display for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", self.0, self.1)
+    }
+}
+
+impl From<Rc<str>> for Symbol {
+    fn from(value: Rc<str>) -> Self {
+        Self(value, 0)
+    }
+}
+impl From<&str> for Symbol {
+    fn from(value: &str) -> Self {
+        Self(value.into(), 0)
+    }
+}
+
 #[derive(Clone)]
 pub enum CompileTimeBinding {
     Symbol(Symbol),
-    Macro,
+    Macro(Function),
 }
 
 #[derive(Clone)]
