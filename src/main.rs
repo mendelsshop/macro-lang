@@ -713,13 +713,13 @@ impl Reader {
         }
     }
 
-    fn read_inner<'a>(input: Input<'a>) -> ReaderInnerResult<'a> {
+    fn read_inner(input: Input<'_>) -> ReaderInnerResult<'_> {
         let mut input = Self::read_whitespace_and_comments(input).1;
         match input.peek() {
             Some('(') => Self::read_list(input),
             Some(')') => {
                 input.next();
-                Err((format!("unfinished pair"), input))
+                Err(("unfinished pair".to_string(), input))
             }
 
             Some(n) if n.is_ascii_digit() => Self::read_number(input),
@@ -728,12 +728,16 @@ impl Reader {
         }
     }
 
-    fn read_whitespace_and_comments<'a>(mut input: Input<'a>) -> (bool, Input<'a>) {
+    fn read_whitespace_and_comments(mut input: Input<'_>) -> (bool, Input<'_>) {
         let mut found = false;
         while let Some(c) = input.peek() {
             match c {
                 ';' => {
                     found = true;
+                    // we do find to skip untill we find newline, this is essentially
+                    // what skip while does, but skip while returns a new type and we
+                    // cannot do impl trait in type alias so this does not work for with
+                    // my input type
                     input.find(|c| *c != '\n');
                 }
                 c if c.is_whitespace() => {
@@ -747,15 +751,51 @@ impl Reader {
     }
 
     // parse symbol if not followed by space paren or comment
-    fn read_number<'a>(input: Input<'a>) -> ReaderInnerResult<'a> {
-        todo!()
+    // invariant Some('.') | Some(c) if c.is_ascci_digit() = input.peek()
+    fn read_number(input: Input<'_>) -> ReaderInnerResult<'_> {
+        let (first, mut input) = Self::read_digit(input);
+        let (second, input) = {
+            if input.peek().copied().filter(|c| *c == '.').is_some() {
+                input.next();
+                let (digits, input) = Self::read_digit(input);
+                (format!(".{digits}"), input)
+            } else {
+                (String::new(), input)
+            }
+        };
+        let (last, input) = Self::read_symbol_inner(input);
+        match (first.as_str(), second.as_str(), last.as_str()) {
+            ("", "." | "", "") => Err(("invalid syntax dangling dot".to_owned(), input)),
+            (_, _, "") => match format!("{first}{second}").parse::<f64>() {
+                Ok(n) => Ok((Ast::Number(n), input)),
+                Err(e) => Err((e.to_string(), input)),
+            },
+
+            (first, second, _) => {
+                let (last, input) = Self::read_symbol_inner(input);
+                Ok((
+                    Ast::Symbol(Symbol(format!("{first}{second}{last}").into(), 0)),
+                    input,
+                ))
+            }
+        }
     }
-    fn read_symbol<'a>(input: Input<'a>) -> ReaderInnerResult<'a> {
-        todo!()
+    fn read_digit(mut input: Input<'_>) -> (String, Input<'_>) {
+        let mut number = String::new();
+        while let Some(n) = input.next().filter(char::is_ascii_digit) {
+            input.next();
+            number.push(n);
+        }
+        (number, input)
+    }
+    // constraints input.next() == Some(c) if c != whitespace or comment or paren
+    fn read_symbol(input: Input<'_>) -> ReaderInnerResult<'_> {
+        let (symbol, input) = Self::read_symbol_inner(input);
+        Ok((Ast::Symbol(Symbol(symbol.into(), 0)), input))
     }
 
     // invariant input.next() == Some('(')
-    fn read_list<'a>(mut input: Input<'a>) -> ReaderInnerResult<'a> {
+    fn read_list(mut input: Input<'_>) -> ReaderInnerResult<'_> {
         input.next();
         let mut list = vec![];
         loop {
@@ -769,14 +809,25 @@ impl Reader {
                 Some(_) => {
                     let item: Ast;
                     (item, input) = Self::read_inner(input)?;
-                    list.push(item)
+                    list.push(item);
                 }
                 None => {
                     input.next();
-                    break Err((format!("unfinished list"), input));
+                    break Err(("unfinished list".to_string(), input));
                 }
             }
         }
+    }
+
+    fn read_symbol_inner(mut input: Input<'_>) -> (String, Input<'_>) {
+        let mut str = String::new();
+        while let Some(char) = input.peek() {
+            if char.is_whitespace() || ['(', ')', ';', '"', '\''].contains(char) {
+                break;
+            }
+            str.push(*char);
+        }
+        (str, input)
     }
 }
 
