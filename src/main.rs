@@ -1,25 +1,43 @@
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
+#![deny(static_mut_refs)]
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
 use core::panic;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
+use std::iter::Peekable;
+use std::str::Chars;
 use std::{cell::RefCell, cmp::Ordering};
 use std::{collections::BTreeSet, rc::Rc};
-
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 struct Scope(usize);
 #[derive(Debug)]
-struct ScopeCreator(usize);
+struct UniqueNumberManager(usize);
 
-impl ScopeCreator {
+// static mut UNIQUE_NUMBER_GENERATOR: usize = 1;
+// fn unique_number_generator() -> usize {
+//     unsafe {
+//         let current = UNIQUE_NUMBER_GENERATOR;
+//         UNIQUE_NUMBER_GENERATOR += 1;
+//         current
+//     }
+// }
+impl UniqueNumberManager {
     fn new() -> Self {
         Self(0)
     }
 
-    fn new_scope(&mut self) -> Scope {
-        let scope = Scope(self.0);
+    fn next(&mut self) -> usize {
+        let current = self.0;
         self.0 += 1;
-        scope
+        current
+    }
+
+    fn new_scope(&mut self) -> Scope {
+        Scope(self.next())
+    }
+
+    fn gen_sym(&mut self, name: impl ToString) -> Symbol {
+        Symbol(name.to_string().into(), self.next())
     }
 }
 
@@ -52,7 +70,8 @@ trait AdjustScope: Sized {
 }
 
 impl Syntax {
-    #[must_use] pub fn new(symbol: Symbol) -> Self {
+    #[must_use]
+    pub fn new(symbol: Symbol) -> Self {
         Self(symbol, BTreeSet::new())
     }
 }
@@ -218,8 +237,7 @@ pub struct Expander<T> {
     core_forms: BTreeSet<Binding>,
     core_primitives: BTreeSet<Binding>,
     core_scope: Scope,
-    scope_creator: ScopeCreator,
-    symbol_count: usize,
+    scope_creator: UniqueNumberManager,
 }
 
 impl Default for Expander<Binding> {
@@ -231,7 +249,7 @@ impl Default for Expander<Binding> {
 impl Expander<Binding> {
     #[must_use]
     pub fn new() -> Self {
-        let mut scope_creator = ScopeCreator::new();
+        let mut scope_creator = UniqueNumberManager::new();
         let core_scope = scope_creator.new_scope();
         let core_forms = BTreeSet::from([
             Binding::Lambda,
@@ -254,7 +272,6 @@ impl Expander<Binding> {
             core_primitives,
             core_forms,
             all_bindings: HashMap::new(),
-            symbol_count: 0,
         };
         this.core_forms
             .clone()
@@ -275,8 +292,7 @@ impl Expander<Binding> {
     }
 
     fn add_local_binding(&mut self, id: Syntax) -> Symbol {
-        let symbol = Symbol(id.0 .0.clone(), self.symbol_count);
-        self.symbol_count += 1;
+        let symbol = self.scope_creator.gen_sym(&id.0);
         self.add_binding(id, Binding::Variable(symbol.clone()));
         symbol
     }
@@ -678,6 +694,92 @@ impl Evaluator {
     }
 }
 
+pub struct Reader(String);
+
+type Input<'a> = Peekable<Chars<'a>>;
+type ReaderInnerResult<'a> = Result<(Ast, Input<'a>), (String, Input<'a>)>;
+impl Reader {
+    pub fn read(&mut self) -> Result<Ast, String> {
+        let input = self.0.chars().peekable();
+        match Self::read_inner(input) {
+            Ok((ast, rest)) => {
+                self.0 = rest.collect();
+                Ok(ast)
+            }
+            Err((reason, rest)) => {
+                self.0 = rest.collect();
+                Err(reason)
+            }
+        }
+    }
+
+    fn read_inner<'a>(input: Input<'a>) -> ReaderInnerResult<'a> {
+        let mut input = Self::read_whitespace_and_comments(input).1;
+        match input.peek() {
+            Some('(') => Self::read_list(input),
+            Some(')') => {
+                input.next();
+                Err((format!("unfinished pair"), input))
+            }
+
+            Some(n) if n.is_ascii_digit() => Self::read_number(input),
+            Some(_) => Self::read_symbol(input),
+            None => Err((String::from("empty input"), input)),
+        }
+    }
+
+    fn read_whitespace_and_comments<'a>(mut input: Input<'a>) -> (bool, Input<'a>) {
+        let mut found = false;
+        while let Some(c) = input.peek() {
+            match c {
+                ';' => {
+                    found = true;
+                    input.find(|c| *c != '\n');
+                }
+                c if c.is_whitespace() => {
+                    found = true;
+                    input.next();
+                }
+                _ => break,
+            }
+        }
+        (found, input)
+    }
+
+    // parse symbol if not followed by space paren or comment
+    fn read_number<'a>(input: Input<'a>) -> ReaderInnerResult<'a> {
+        todo!()
+    }
+    fn read_symbol<'a>(input: Input<'a>) -> ReaderInnerResult<'a> {
+        todo!()
+    }
+
+    // invariant input.next() == Some('(')
+    fn read_list<'a>(mut input: Input<'a>) -> ReaderInnerResult<'a> {
+        input.next();
+        let mut list = vec![];
+        loop {
+            input = Self::read_whitespace_and_comments(input).1;
+            match input.peek() {
+                // TODO: dot tailed list and pair instead of list
+                Some(')') => {
+                    input.next();
+                    break Ok((Ast::List(list), input));
+                }
+                Some(_) => {
+                    let item: Ast;
+                    (item, input) = Self::read_inner(input)?;
+                    list.push(item)
+                }
+                None => {
+                    input.next();
+                    break Err((format!("unfinished list"), input));
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Symbol(pub Rc<str>, pub usize);
 
@@ -737,7 +839,7 @@ fn main() {
 mod tests {
     use std::collections::BTreeSet;
 
-    use crate::{AdjustScope, Ast, Binding, Expander, Scope, ScopeCreator, Symbol, Syntax};
+    use crate::{AdjustScope, Ast, Binding, Expander, Scope, Symbol, Syntax, UniqueNumberManager};
 
     #[test]
     fn identifier_test_with_empty_syntax() {
@@ -822,7 +924,7 @@ mod tests {
 
     #[test]
     fn scope_equality_test() {
-        let mut scope_creator = ScopeCreator::new();
+        let mut scope_creator = UniqueNumberManager::new();
         let sc1 = scope_creator.new_scope();
         let sc2 = scope_creator.new_scope();
         assert_ne!(sc1, sc2);
@@ -831,7 +933,7 @@ mod tests {
 
     #[test]
     fn add_scope_test_empty_scope() {
-        let mut scope_creator = ScopeCreator::new();
+        let mut scope_creator = UniqueNumberManager::new();
         let sc1 = scope_creator.new_scope();
         assert_eq!(
             Ast::Syntax(Syntax("x".into(), BTreeSet::new())).add_scope(sc1),
@@ -841,7 +943,7 @@ mod tests {
 
     #[test]
     fn add_scope_test_empty_scope_list() {
-        let mut scope_creator = ScopeCreator::new();
+        let mut scope_creator = UniqueNumberManager::new();
         let sc1 = scope_creator.new_scope();
         assert_eq!(
             Ast::List(vec![
@@ -859,7 +961,7 @@ mod tests {
 
     #[test]
     fn add_scope_test_non_empty_scope() {
-        let mut scope_creator = ScopeCreator::new();
+        let mut scope_creator = UniqueNumberManager::new();
         let sc1 = scope_creator.new_scope();
         let sc2 = scope_creator.new_scope();
         assert_eq!(
@@ -870,7 +972,7 @@ mod tests {
 
     #[test]
     fn add_scope_test_add_duplicate() {
-        let mut scope_creator = ScopeCreator::new();
+        let mut scope_creator = UniqueNumberManager::new();
         let sc1 = scope_creator.new_scope();
         assert_eq!(
             Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1]))).add_scope(sc1),
@@ -880,7 +982,7 @@ mod tests {
 
     #[test]
     fn flip_scope_test_different() {
-        let mut scope_creator = ScopeCreator::new();
+        let mut scope_creator = UniqueNumberManager::new();
         let sc1 = scope_creator.new_scope();
         let sc2 = scope_creator.new_scope();
         assert_eq!(
@@ -891,7 +993,7 @@ mod tests {
 
     #[test]
     fn flip_scope_test_same() {
-        let mut scope_creator = ScopeCreator::new();
+        let mut scope_creator = UniqueNumberManager::new();
         let sc1 = scope_creator.new_scope();
         let sc2 = scope_creator.new_scope();
         assert_eq!(
