@@ -118,6 +118,15 @@ pub enum Function {
     Primitive(Primitive),
 }
 
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Lambda(_) => write!(f, "(procedure)"),
+            Self::Primitive(_) => write!(f, "(primitive-procedure)"),
+        }
+    }
+}
+
 impl Function {
     fn apply(&self, args: Vec<Ast>) -> Result<Ast, String> {
         match self {
@@ -152,7 +161,24 @@ pub enum Ast {
     Symbol(Symbol),
     Function(Function),
 }
-
+impl fmt::Display for Ast {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::List(l) => write!(
+                f,
+                "({})",
+                l.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            Self::Syntax(s) => write!(f, "#'{}", s.0),
+            Self::Number(n) => write!(f, "{n}"),
+            Self::Symbol(s) => write!(f, "{s}"),
+            Self::Function(function) => write!(f, "{function}"),
+        }
+    }
+}
 impl Ast {
     pub fn datum_to_syntax(self) -> Self {
         match self {
@@ -240,7 +266,7 @@ pub struct Expander<T> {
     core_primitives: BTreeSet<Binding>,
     core_scope: Scope,
     scope_creator: UniqueNumberManager,
-    env: EnvRef
+    env: EnvRef,
 }
 
 impl Default for Expander<Binding> {
@@ -275,7 +301,7 @@ impl Expander<Binding> {
             core_primitives,
             core_forms,
             all_bindings: HashMap::new(),
-            env: new_env()
+            env: new_env(),
         };
         this.core_forms
             .clone()
@@ -296,7 +322,7 @@ impl Expander<Binding> {
     }
 
     fn add_local_binding(&mut self, id: Syntax) -> Symbol {
-        let symbol = self.scope_creator.gen_sym(&id.0);
+        let symbol = self.scope_creator.gen_sym(&id.0 .0);
         self.add_binding(id, Binding::Variable(symbol.clone()));
         symbol
     }
@@ -448,13 +474,13 @@ impl Expander<Binding> {
     }
 
     fn eval_for_syntax_binding(&mut self, rhs: Ast) -> Result<CompileTimeBinding, String> {
-        // let var_name = format!("problem `evaluating` macro {rhs:?}");
+        // let var_name = format!("problem `evaluating` macro {rhs}");
         let expand = self.expand(rhs, CompileTimeEnvoirnment::new());
         self.eval_compiled(self.compile(expand?)?).and_then(|e| {
             if let Ast::Function(f) = e {
                 Ok(CompileTimeBinding::Macro(f))
             } else {
-                Err(format!("{e:?} is not a macro"))
+                Err(format!("{e} is not a macro"))
             }
         })
     }
@@ -462,7 +488,9 @@ impl Expander<Binding> {
     fn compile(&self, rhs: Ast) -> Result<Ast, String> {
         match rhs {
             Ast::List(l) => {
-                let s = l.first().ok_or("bad syntax empty application".to_string())?;
+                let s = l
+                    .first()
+                    .ok_or("bad syntax empty application".to_string())?;
                 let core_sym = if let Ast::Syntax(s) = s {
                     self.resolve(s)
                 } else {
@@ -520,7 +548,7 @@ impl Expander<Binding> {
                 }
             }
             Ast::Number(_) | Ast::Function(_) => Ok(rhs),
-            Ast::Symbol(_) => unreachable!()
+            Ast::Symbol(_) => unreachable!(),
         }
     }
 
@@ -658,7 +686,7 @@ impl Evaluator {
                             if let Ast::Symbol(s) = arg {
                                 Ok(s)
                             } else {
-                                Err(format!("bad syntax {arg:?} is not a valid paramter"))
+                                Err(format!("bad syntax {arg} is not a valid paramter"))
                             }
                         })
                         .collect::<Result<Vec<_>, _>>()?;
@@ -675,7 +703,9 @@ impl Evaluator {
                     if list.len() == 2 {
                         Ok(Box::new(move |_| Ok(list[1].clone())))
                     } else {
-                        Err(format!("bad syntax {list:?}, quote requires one expression"))
+                        Err(format!(
+                            "bad syntax {list:?}, quote requires one expression"
+                        ))
                     }
                 }
                 Some(f) => {
@@ -698,9 +728,7 @@ impl Evaluator {
                 None => Err(format!("bad syntax {list:?}, empty application")),
             },
             Ast::Symbol(s) => Ok(Box::new(move |env| {
-                env.borrow()
-                    .lookup(&s)
-                    .ok_or(format!("free variable {s:?}"))
+                env.borrow().lookup(&s).ok_or(format!("free variable {s}"))
             })),
             _ => Ok(Box::new(move |_| Ok(expr.clone()))),
         }
@@ -711,7 +739,7 @@ impl Evaluator {
             f.apply(args)
         } else {
             Err(format!(
-                "cannot not apply {f:?} to {args:?}, because {f:?} is not a function"
+                "cannot not apply {f} to {args:?}, because {f} is not a function"
             ))
         }
     }
@@ -906,7 +934,7 @@ impl Reader {
 
     fn read_symbol_inner(mut input: Input) -> (String, Input) {
         let mut str = String::new();
-        while let Some(char) = input.peek().cloned() {
+        while let Some(char) = input.peek().copied() {
             if char.is_whitespace() || ['(', ')', ';', '"', '\''].contains(&char) {
                 break;
             }
@@ -981,24 +1009,22 @@ fn main() {
     let mut expander = Expander::new();
     loop {
         print!(">> ");
-        let ast = match reader.read_with_continue(newline) {
-            Ok(ast) => ast,
-            Err(e) => {
-                println!("{e}");
-                continue;
-            }
-        };
-        println!("{ast:?}");
 
-        let ast = expander
-            .expand(
-                expander.introduce(ast.datum_to_syntax()),
-                CompileTimeEnvoirnment::new(),
-            )
+        let ast = reader
+            .read_with_continue(newline)
+            .inspect(|e| println!("after reader: {e}"))
+            .and_then(|ast| {
+                expander.expand(
+                    expander.introduce(ast.datum_to_syntax()),
+                    CompileTimeEnvoirnment::new(),
+                )
+            })
+            .inspect(|e| println!("after expansion: {e}"))
             .and_then(|ast| expander.compile(ast))
+            .inspect(|e| println!("after expansion part 2: {e}"))
             .and_then(|ast| expander.eval_compiled(ast));
         match ast {
-            Ok(expr) => println!("{expr:?}"),
+            Ok(expr) => println!("{expr}"),
             Err(e) => println!("{e}"),
         }
     }
