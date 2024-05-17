@@ -167,7 +167,7 @@ impl fmt::Display for Ast {
             Self::List(l) => write!(
                 f,
                 "({})",
-                l.iter()
+                l.into_iter()
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(" "),
@@ -224,14 +224,6 @@ enum Binding {
     LetSyntax,
     Quote,
     QuoteSyntax,
-    // DatumToSyntax,
-    // SyntaxToDatum,
-    // SyntaxE,
-    // List,
-    // Cons,
-    // Car,
-    // Cdr,
-    // Map,
     Variable(Symbol),
 }
 
@@ -241,21 +233,24 @@ impl fmt::Display for Binding {
             f,
             "{}",
             match self {
-                Self::Variable(Symbol(s, i)) => format!("{s}{i}"),
+                Self::Variable(s) => format!("{s}"),
                 Self::Lambda => "lambda".to_string(),
                 Self::LetSyntax => "let-syntax".to_string(),
                 Self::Quote => "quote".to_string(),
                 Self::QuoteSyntax => "quote-syntax".to_string(),
-                // Self::DatumToSyntax => "datum->syntax".to_owned(),
-                // Self::SyntaxToDatum => "syntax->datum".to_owned(),
-                // Self::SyntaxE => "syntax-e".to_string(),
-                // Self::List => "list".to_string(),
-                // Self::Cons => "cons".to_string(),
-                // Self::Car => "car".to_string(),
-                // Self::Cdr => "cdr".to_string(),
-                // Self::Map => "map".to_string(),
             }
         )
+    }
+}
+impl From<Binding> for Symbol {
+    fn from(value: Binding) -> Self {
+        match value {
+            Binding::Variable(s) => s,
+            Binding::Lambda => "lambda".into(),
+            Binding::LetSyntax => "let-syntax".into(),
+            Binding::Quote => "quote".into(),
+            Binding::QuoteSyntax => "quote-syntax".into(),
+        }
     }
 }
 
@@ -308,10 +303,7 @@ impl Expander<Binding> {
             .union(&this.core_primitives.clone())
             .for_each(|core| {
                 this.add_binding(
-                    Syntax(
-                        Symbol(core.to_string().into(), 0),
-                        BTreeSet::from([this.core_scope]),
-                    ),
+                    Syntax(core.clone().into(), BTreeSet::from([this.core_scope])),
                     core.clone(),
                 );
             });
@@ -332,7 +324,7 @@ impl Expander<Binding> {
         let id = candidate_ids
             .clone()
             .max_by_key(|id| id.1.len())
-            .ok_or(format!("free variable {}", id.0 .0))?;
+            .ok_or(format!("free variable {:?}", id))?;
         if check_unambiguous(id, candidate_ids) {
             self.all_bindings
                 .get(id)
@@ -374,6 +366,7 @@ impl Expander<Binding> {
         } else if self.core_primitives.contains(binding) {
             Ok(Ast::Syntax(s))
         } else {
+            println!("{:?}", self.core_primitives);
             let Binding::Variable(binding) = binding else {
                 panic!()
             };
@@ -407,15 +400,13 @@ impl Expander<Binding> {
                 _ => Err(format!("bad syntax to many expression in quote {s:?}")),
             },
             Binding::Variable(binding) => {
-                let v = env
-                    .lookup(binding)
-                    .ok_or(format!("out of context {}", binding.0))?;
-                match v {
-                    CompileTimeBinding::Symbol(_) => self.expand_app(s, env),
-                    CompileTimeBinding::Macro(m) => {
+                match env
+                    .lookup(binding) {
+                    Some(CompileTimeBinding::Macro(m)) => {
                         let apply_transformer = self.apply_transformer(m, Ast::List(s));
                         self.expand(apply_transformer?, env)
                     }
+                    _ => self.expand_app(s, env),
                 }
             }
         }
@@ -592,6 +583,67 @@ fn new_env() -> Rc<RefCell<Env>> {
                 Err(format!("arity error: expected 1 argument, got {}", e.len()))?
             };
             Ok(Ast::Symbol(e.clone()))
+        })),
+    );
+    env.borrow_mut().define(
+        Symbol("cons".into(), 0),
+        Ast::Function(Function::Primitive(move |e| {
+            if e.len() != 2 {
+                Err(format!("arity error: expected 2 argument, got {}", e.len()))?
+            };
+            Ok(Ast::List(e))
+        })),
+    );
+    env.borrow_mut().define(
+        Symbol("car".into(), 0),
+        Ast::Function(Function::Primitive(move |e| {
+            let [Ast::List(cons)] = &e[..] else {
+                Err(format!(
+                    "arity error: expected 1 argument, got {}, or was not cons",
+                    e.len()
+                ))?
+            };
+            let [fst, ..] = &cons[..] else {
+                Err(format!("arity error: expected 1 argument, got {}", e.len()))?
+            };
+            Ok(fst.clone())
+        })),
+    );
+    env.borrow_mut().define(
+        Symbol("cdr".into(), 0),
+        Ast::Function(Function::Primitive(move |e| {
+            let [Ast::List(cons)] = &e[..] else {
+                Err(format!(
+                    "arity error: expected 1 argument, got {}, or was not cons",
+                    e.len()
+                ))?
+            };
+            let [_, rest @ ..] = &cons[..] else {
+                Err(format!("arity error: expected 1 argument, got {}", e.len()))?
+            };
+            Ok(Ast::List(rest.to_vec()))
+        })),
+    );
+    env.borrow_mut().define(
+        Symbol("list".into(), 0),
+        Ast::Function(Function::Primitive(move |e| {
+            Ok(Ast::List(e))
+        })),
+    );
+    env.borrow_mut().define(
+        Symbol("map".into(), 0),
+        Ast::Function(Function::Primitive(move |e| {
+            let [Ast::Function(f), Ast::List(cons)] = &e[..] else {
+                Err(format!(
+                    "arity error: expected 2 argument, got {}, or was not function, cons",
+                    e.len()
+                ))?
+            };
+            Ok(Ast::List(
+                cons.into_iter()
+                    .map(|a| f.apply(vec![a.clone()]))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ))
         })),
     );
     env
@@ -934,7 +986,7 @@ impl Reader {
 
     fn read_symbol_inner(mut input: Input) -> (String, Input) {
         let mut str = String::new();
-        while let Some(char) = input.peek().copied() {
+        while let Some(char) = input.peek().cloned() {
             if char.is_whitespace() || ['(', ')', ';', '"', '\''].contains(&char) {
                 break;
             }
@@ -1008,7 +1060,7 @@ fn main() {
     };
     let mut expander = Expander::new();
     loop {
-        print!(">> ");
+        print!("\n>> ",);
 
         let ast = reader
             .read_with_continue(newline)
