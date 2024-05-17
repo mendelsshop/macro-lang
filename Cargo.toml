@@ -4,3 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+trace = { git = "https://github.com/gsingh93/trace", version = "0.1.7" }

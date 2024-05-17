@@ -4,10 +4,12 @@
 use core::panic;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
+use std::io::{BufRead, BufReader, Write};
 use std::iter::Peekable;
-use std::str::Chars;
 use std::{cell::RefCell, cmp::Ordering};
 use std::{collections::BTreeSet, rc::Rc};
+
+// use trace::trace;
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 struct Scope(usize);
 #[derive(Debug)]
@@ -23,7 +25,7 @@ struct UniqueNumberManager(usize);
 // }
 impl UniqueNumberManager {
     fn new() -> Self {
-        Self(0)
+        Self(1)
     }
 
     fn next(&mut self) -> usize {
@@ -238,6 +240,7 @@ pub struct Expander<T> {
     core_primitives: BTreeSet<Binding>,
     core_scope: Scope,
     scope_creator: UniqueNumberManager,
+    env: EnvRef
 }
 
 impl Default for Expander<Binding> {
@@ -272,6 +275,7 @@ impl Expander<Binding> {
             core_primitives,
             core_forms,
             all_bindings: HashMap::new(),
+            env: new_env()
         };
         this.core_forms
             .clone()
@@ -297,13 +301,19 @@ impl Expander<Binding> {
         symbol
     }
 
-    fn resolve(&self, id: &Syntax) -> Option<&Binding> {
+    fn resolve(&self, id: &Syntax) -> Result<&Binding, String> {
         let candidate_ids = self.find_all_matching_bindings(id);
-        candidate_ids
+        let id = candidate_ids
             .clone()
             .max_by_key(|id| id.1.len())
-            .filter(|id| check_unambiguous(id, candidate_ids))
-            .and_then(|id| self.all_bindings.get(id))
+            .ok_or(format!("free variable {}", id.0 .0))?;
+        if check_unambiguous(id, candidate_ids) {
+            self.all_bindings
+                .get(id)
+                .ok_or(format!("free variable {}", id.0 .0))
+        } else {
+            Err(format!("ambiguous binding {}", id.0 .0))
+        }
     }
 
     fn find_all_matching_bindings<'a>(
@@ -325,17 +335,16 @@ impl Expander<Binding> {
                 self.expand_id_application_form(l, env)
             }
             Ast::Syntax(s) => self.expand_identifier(s, env),
-            Ast::Number(_) => todo!(),
-            Ast::Symbol(_) => todo!(),
-            Ast::List(_) => todo!(),
-            Ast::Function(_) => todo!(),
+            Ast::Number(_) | Ast::Function(_) => Ok(s),
+            Ast::Symbol(_) => unreachable!(),
+            Ast::List(l) => self.expand_app(l, env),
         }
     }
 
     fn expand_identifier(&self, s: Syntax, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        let binding = self.resolve(&s).ok_or(format!("free variable {}", s.0))?;
+        let binding = self.resolve(&s)?;
         if self.core_forms.contains(binding) {
-            Err(format!("bad syntax {}", s.0))
+            Err(format!("bad syntax dangling core form {}", s.0))
         } else if self.core_primitives.contains(binding) {
             Ok(Ast::Syntax(s))
         } else {
@@ -348,7 +357,7 @@ impl Expander<Binding> {
             if let CompileTimeBinding::Symbol(_) = v {
                 Ok(Ast::Syntax(s))
             } else {
-                Err(format!("bad syntax {}", s.0))
+                Err(format!("bad syntax non function call macro {}", s.0))
             }
         }
     }
@@ -363,13 +372,13 @@ impl Expander<Binding> {
         let Some(Ast::Syntax(id)) = s.first() else {
             unreachable!()
         };
-        let binding = self.resolve(id).ok_or(format!("free variable {}", id.0))?;
+        let binding = self.resolve(id)?;
         match binding {
             Binding::Lambda => self.expand_lambda(s, env),
             Binding::LetSyntax => self.expand_let_syntax(s, env),
             Binding::Quote | Binding::QuoteSyntax => match &s[..] {
                 [_, _] => Ok(Ast::List(s)),
-                _ => Err(format!("bad syntax {s:?}")),
+                _ => Err(format!("bad syntax to many expression in quote {s:?}")),
             },
             Binding::Variable(binding) => {
                 let v = env
@@ -395,10 +404,10 @@ impl Expander<Binding> {
 
     fn expand_lambda(&mut self, s: Vec<Ast>, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
         let [lambda_id, Ast::List(arg), body] = &s[..] else {
-            Err(format!("invalid syntax {s:?}"))?
+            Err(format!("invalid syntax {s:?} bad lambda"))?
         };
         let [Ast::Syntax(arg_id)] = &arg[..] else {
-            Err(format!("invalid syntax {s:?}"))?
+            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
         };
         let sc = self.scope_creator.new_scope();
         let id = arg_id.clone().add_scope(sc);
@@ -418,10 +427,17 @@ impl Expander<Binding> {
         env: CompileTimeEnvoirnment,
     ) -> Result<Ast, String> {
         let [_let_syntax_id, Ast::List(arg), body] = &s[..] else {
-            Err(format!("invalid syntax {s:?}"))?
+            Err(format!("invalid syntax {s:?} bad let-syntax"))?
+        };
+        let [Ast::List(arg)] = &arg[..] else {
+            Err(format!(
+                "invalid syntax {s:?}, bad binder list for let-syntax {arg:?}"
+            ))?
         };
         let [Ast::Syntax(lhs_id), rhs] = &arg[..] else {
-            Err(format!("invalid syntax {s:?}"))?
+            Err(format!(
+                "invalid syntax {s:?}, bad binder for let-syntax {arg:?}"
+            ))?
         };
         let sc = self.scope_creator.new_scope();
         let id = lhs_id.clone().add_scope(sc);
@@ -432,111 +448,84 @@ impl Expander<Binding> {
     }
 
     fn eval_for_syntax_binding(&mut self, rhs: Ast) -> Result<CompileTimeBinding, String> {
-        let var_name = format!("problem `evaluating` macro {rhs:?}");
+        // let var_name = format!("problem `evaluating` macro {rhs:?}");
         let expand = self.expand(rhs, CompileTimeEnvoirnment::new());
-        self.eval_compiled(self.compile(expand?).ok_or(var_name)?)
-    }
-
-    fn compile(&self, rhs: Ast) -> Option<Ast> {
-        match rhs {
-            Ast::List(l) => {
-                let s = l.first()?;
-                let core_sym = if let Ast::Syntax(s) = s {
-                    self.resolve(s)
-                } else {
-                    None
-                };
-                match core_sym {
-                    Some(Binding::Lambda) => {
-                        let [_, Ast::List(arg), body] = &l[..] else {
-                            None?
-                        };
-                        let [Ast::Syntax(id)] = &arg[..] else { None? };
-                        let Binding::Variable(id) = self.resolve(id)? else {
-                            None?
-                        };
-                        Some(Ast::List(vec![
-                            Ast::Symbol(Symbol("lambda".into(), 0)),
-                            Ast::List(vec![Ast::Symbol(id.clone())]),
-                            self.compile(body.clone())?,
-                        ]))
-                    }
-                    Some(Binding::Quote) => {
-                        if let [_, datum] = &l[..] {
-                            Some(Ast::List(vec![
-                                Ast::Symbol(Symbol("quote".into(), 0)),
-                                datum.clone().syntax_to_datum(),
-                            ]))
-                        } else {
-                            None
-                        }
-                    }
-                    Some(Binding::QuoteSyntax) => {
-                        if let [_, datum] = &l[..] {
-                            Some(Ast::List(vec![
-                                Ast::Symbol(Symbol("quote".into(), 0)),
-                                datum.clone(),
-                            ]))
-                        } else {
-                            None
-                        }
-                    }
-                    _ => Some(Ast::List(
-                        l.into_iter()
-                            .map(|e| self.compile(e))
-                            .collect::<Option<Vec<_>>>()?,
-                    )),
-                }
-            }
-            Ast::Syntax(s) => {
-                if let Binding::Variable(s) = self.resolve(&s)? {
-                    Some(Ast::Symbol(s.clone()))
-                } else {
-                    None
-                }
-            }
-            Ast::Number(_) => Some(rhs),
-            Ast::Symbol(_) => todo!(),
-            Ast::Function(_) => todo!(),
-        }
-    }
-
-    fn eval_compiled(&self, new: Ast) -> Result<CompileTimeBinding, String> {
-        let env = Env::new();
-        env.borrow_mut().define(
-            Symbol("datum->syntax".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                let [e] = &e[..] else {
-                    Err(format!("arity error: expected 1 argument, got {}", e.len()))?
-                };
-                Ok(e.clone().datum_to_syntax())
-            })),
-        );
-        env.borrow_mut().define(
-            Symbol("syntax->datum".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                let [e] = &e[..] else {
-                    Err(format!("arity error: expected 1 argument, got {}", e.len()))?
-                };
-                Ok(e.clone().syntax_to_datum())
-            })),
-        );
-        env.borrow_mut().define(
-            Symbol("syntax-e".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                let [Ast::Syntax(Syntax(e, _))] = &e[..] else {
-                    Err(format!("arity error: expected 1 argument, got {}", e.len()))?
-                };
-                Ok(Ast::Symbol(e.clone()))
-            })),
-        );
-        Evaluator::eval(new, env).and_then(|e| {
+        self.eval_compiled(self.compile(expand?)?).and_then(|e| {
             if let Ast::Function(f) = e {
                 Ok(CompileTimeBinding::Macro(f))
             } else {
                 Err(format!("{e:?} is not a macro"))
             }
         })
+    }
+
+    fn compile(&self, rhs: Ast) -> Result<Ast, String> {
+        match rhs {
+            Ast::List(l) => {
+                let s = l.first().ok_or("bad syntax empty application".to_string())?;
+                let core_sym = if let Ast::Syntax(s) = s {
+                    self.resolve(s)
+                } else {
+                    Err("just for _ case in next match does not actually error".to_string())
+                };
+                match core_sym {
+                    Ok(Binding::Lambda) => {
+                        let [_, Ast::List(arg), body] = &l[..] else {
+                            Err("bad syntax lambda")?
+                        };
+                        let [Ast::Syntax(id)] = &arg[..] else {
+                            Err("bad syntax lambda arg")?
+                        };
+                        let Binding::Variable(id) = self.resolve(id)? else {
+                            Err("bad syntax cannot play with core form")?
+                        };
+                        Ok(Ast::List(vec![
+                            Ast::Symbol(Symbol("lambda".into(), 0)),
+                            Ast::List(vec![Ast::Symbol(id.clone())]),
+                            self.compile(body.clone())?,
+                        ]))
+                    }
+                    Ok(Binding::Quote) => {
+                        if let [_, datum] = &l[..] {
+                            Ok(Ast::List(vec![
+                                Ast::Symbol(Symbol("quote".into(), 0)),
+                                datum.clone().syntax_to_datum(),
+                            ]))
+                        } else {
+                            Err("bad syntax, quote requires one expression")?
+                        }
+                    }
+                    Ok(Binding::QuoteSyntax) => {
+                        if let [_, datum] = &l[..] {
+                            Ok(Ast::List(vec![
+                                Ast::Symbol(Symbol("quote".into(), 0)),
+                                datum.clone(),
+                            ]))
+                        } else {
+                            Err("bad syntax, quote-syntax requires one expression")?
+                        }
+                    }
+                    _ => Ok(Ast::List(
+                        l.into_iter()
+                            .map(|e| self.compile(e))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    )),
+                }
+            }
+            Ast::Syntax(s) => {
+                if let Binding::Variable(s) = self.resolve(&s)? {
+                    Ok(Ast::Symbol(s.clone()))
+                } else {
+                    Err("bad syntax cannot play with core form")?
+                }
+            }
+            Ast::Number(_) | Ast::Function(_) => Ok(rhs),
+            Ast::Symbol(_) => unreachable!()
+        }
+    }
+
+    fn eval_compiled(&self, new: Ast) -> Result<Ast, String> {
+        Evaluator::eval(new, self.env.clone())
     }
 
     fn apply_transformer(&mut self, m: Function, s: Ast) -> Result<Ast, String> {
@@ -546,6 +535,38 @@ impl Expander<Binding> {
 
         Ok(transformed_s.flip_scope(intro_scope))
     }
+}
+
+fn new_env() -> Rc<RefCell<Env>> {
+    let env = Env::new();
+    env.borrow_mut().define(
+        Symbol("datum->syntax".into(), 0),
+        Ast::Function(Function::Primitive(move |e| {
+            let [e] = &e[..] else {
+                Err(format!("arity error: expected 1 argument, got {}", e.len()))?
+            };
+            Ok(e.clone().datum_to_syntax())
+        })),
+    );
+    env.borrow_mut().define(
+        Symbol("syntax->datum".into(), 0),
+        Ast::Function(Function::Primitive(move |e| {
+            let [e] = &e[..] else {
+                Err(format!("arity error: expected 1 argument, got {}", e.len()))?
+            };
+            Ok(e.clone().syntax_to_datum())
+        })),
+    );
+    env.borrow_mut().define(
+        Symbol("syntax-e".into(), 0),
+        Ast::Function(Function::Primitive(move |e| {
+            let [Ast::Syntax(Syntax(e, _))] = &e[..] else {
+                Err(format!("arity error: expected 1 argument, got {}", e.len()))?
+            };
+            Ok(Ast::Symbol(e.clone()))
+        })),
+    );
+    env
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -623,11 +644,13 @@ impl Evaluator {
         match expr {
             Ast::List(list) => match list.first() {
                 Some(Ast::Symbol(Symbol(lambda, 0))) if **lambda == *"lambda" => {
-                    let mut list = list.clone().into_iter();
+                    let mut list = list.clone().into_iter().skip(1);
                     let (Some(Ast::List(arg)), Some(body), None) =
                         (list.next(), list.next(), list.next())
                     else {
-                        Err(format!("bad syntax {list:?}"))?
+                        Err(format!(
+                            "bad syntax {list:?}, lambda not in form (lambda (args) body)"
+                        ))?
                     };
                     let args = arg
                         .into_iter()
@@ -652,7 +675,7 @@ impl Evaluator {
                     if list.len() == 2 {
                         Ok(Box::new(move |_| Ok(list[1].clone())))
                     } else {
-                        Err(format!("bad syntax {list:?}"))
+                        Err(format!("bad syntax {list:?}, quote requires one expression"))
                     }
                 }
                 Some(f) => {
@@ -672,7 +695,7 @@ impl Evaluator {
                         )
                     }))
                 }
-                None => Err(format!("bad syntax {list:?}")),
+                None => Err(format!("bad syntax {list:?}, empty application")),
             },
             Ast::Symbol(s) => Ok(Box::new(move |env| {
                 env.borrow()
@@ -695,13 +718,42 @@ impl Evaluator {
 }
 
 pub struct Reader(String);
+#[derive(Debug)]
+struct OwnedChars {
+    string: String,
+    position: usize,
+}
 
-type Input<'a> = Peekable<Chars<'a>>;
-type ReaderInnerResult<'a> = Result<(Ast, Input<'a>), (String, Input<'a>)>;
+impl Iterator for OwnedChars {
+    type Item = char;
+
+    fn next(&mut self) -> Option<char> {
+        let c = self.string[self.position..].chars().next()?;
+        self.position += c.len_utf8();
+        Some(c)
+    }
+}
+
+trait OwnedCharsExt {
+    fn chars(self) -> OwnedChars;
+}
+impl OwnedCharsExt for String {
+    fn chars(self) -> OwnedChars {
+        OwnedChars {
+            string: self,
+            position: 0,
+        }
+    }
+}
+trace::init_depth_var!();
+type Input = Peekable<OwnedChars>;
+type ReaderInnerResult = Result<(Ast, Input), (String, Input)>;
 impl Reader {
+    // we have empty continuations for if we run out of input, but we can recover if we get more
+    // input
     pub fn read(&mut self) -> Result<Ast, String> {
-        let input = self.0.chars().peekable();
-        match Self::read_inner(input) {
+        let input = <String as Clone>::clone(&self.0).chars().peekable();
+        match Self::read_inner(input, &mut || None) {
             Ok((ast, rest)) => {
                 self.0 = rest.collect();
                 Ok(ast)
@@ -712,11 +764,31 @@ impl Reader {
             }
         }
     }
-
-    fn read_inner(input: Input<'_>) -> ReaderInnerResult<'_> {
+    pub fn read_with_continue(
+        &mut self,
+        mut empty_continuation: impl FnMut() -> String,
+    ) -> Result<Ast, String> {
+        let input = <String as Clone>::clone(&self.0).chars().peekable();
+        match Self::read_inner(input, &mut || Some(empty_continuation())) {
+            Ok((ast, rest)) => {
+                self.0 = rest.collect();
+                Ok(ast)
+            }
+            Err((reason, rest)) => {
+                self.0 = rest.collect();
+                Err(reason)
+            }
+        }
+    }
+    // #[trace(format_enter = "", format_exit = "")]
+    fn read_inner(
+        input: Input,
+        empty_continuation: &mut impl FnMut() -> Option<String>,
+    ) -> ReaderInnerResult {
         let mut input = Self::read_whitespace_and_comments(input).1;
         match input.peek() {
-            Some('(') => Self::read_list(input),
+            // TODO: quote
+            Some('(') => Self::read_list(input, empty_continuation),
             Some(')') => {
                 input.next();
                 Err(("unfinished pair".to_string(), input))
@@ -724,11 +796,17 @@ impl Reader {
 
             Some(n) if n.is_ascii_digit() => Self::read_number(input),
             Some(_) => Self::read_symbol(input),
-            None => Err((String::from("empty input"), input)),
+            None => empty_continuation()
+                .ok_or((String::from("empty input"), input))
+                .and_then(|input| {
+                    let input = input.chars().peekable();
+                    Self::read_inner(input, empty_continuation)
+                }),
         }
     }
 
-    fn read_whitespace_and_comments(mut input: Input<'_>) -> (bool, Input<'_>) {
+    // #[trace(format_enter = "", format_exit = "")]
+    fn read_whitespace_and_comments(mut input: Input) -> (bool, Input) {
         let mut found = false;
         while let Some(c) = input.peek() {
             match c {
@@ -750,9 +828,10 @@ impl Reader {
         (found, input)
     }
 
+    // #[trace(format_enter = "", format_exit = "")]
     // parse symbol if not followed by space paren or comment
     // invariant Some('.') | Some(c) if c.is_ascci_digit() = input.peek()
-    fn read_number(input: Input<'_>) -> ReaderInnerResult<'_> {
+    fn read_number(input: Input) -> ReaderInnerResult {
         let (first, mut input) = Self::read_digit(input);
         let (second, input) = {
             if input.peek().copied().filter(|c| *c == '.').is_some() {
@@ -780,22 +859,27 @@ impl Reader {
             }
         }
     }
-    fn read_digit(mut input: Input<'_>) -> (String, Input<'_>) {
+    fn read_digit(mut input: Input) -> (String, Input) {
         let mut number = String::new();
-        while let Some(n) = input.next().filter(char::is_ascii_digit) {
+        while let Some(n) = input.peek().copied().filter(char::is_ascii_digit) {
             input.next();
             number.push(n);
         }
         (number, input)
     }
     // constraints input.next() == Some(c) if c != whitespace or comment or paren
-    fn read_symbol(input: Input<'_>) -> ReaderInnerResult<'_> {
+    // #[trace(format_enter = "", format_exit = "")]
+    fn read_symbol(input: Input) -> ReaderInnerResult {
         let (symbol, input) = Self::read_symbol_inner(input);
         Ok((Ast::Symbol(Symbol(symbol.into(), 0)), input))
     }
 
     // invariant input.next() == Some('(')
-    fn read_list(mut input: Input<'_>) -> ReaderInnerResult<'_> {
+    // #[trace(format_enter = "", format_exit = "")]
+    fn read_list(
+        mut input: Input,
+        empty_continuation: &mut impl FnMut() -> Option<String>,
+    ) -> ReaderInnerResult {
         input.next();
         let mut list = vec![];
         loop {
@@ -808,24 +892,26 @@ impl Reader {
                 }
                 Some(_) => {
                     let item: Ast;
-                    (item, input) = Self::read_inner(input)?;
+                    (item, input) = Self::read_inner(input, empty_continuation)?;
                     list.push(item);
                 }
                 None => {
-                    input.next();
-                    break Err(("unfinished list".to_string(), input));
+                    input = empty_continuation()
+                        .ok_or(("unfinished list".to_string(), input))
+                        .map(|input| input.chars().peekable())?;
                 }
             }
         }
     }
 
-    fn read_symbol_inner(mut input: Input<'_>) -> (String, Input<'_>) {
+    fn read_symbol_inner(mut input: Input) -> (String, Input) {
         let mut str = String::new();
-        while let Some(char) = input.peek() {
-            if char.is_whitespace() || ['(', ')', ';', '"', '\''].contains(char) {
+        while let Some(char) = input.peek().cloned() {
+            if char.is_whitespace() || ['(', ')', ';', '"', '\''].contains(&char) {
                 break;
             }
-            str.push(*char);
+            input.next();
+            str.push(char);
         }
         (str, input)
     }
@@ -883,7 +969,39 @@ fn check_unambiguous<'a>(id: &Syntax, mut candidate_ids: impl Iterator<Item = &'
 }
 
 fn main() {
-    println!("Hello, world!");
+    let mut reader = Reader(String::new());
+    let newline = || {
+        let mut stdin = BufReader::new(std::io::stdin());
+        let mut input = String::new();
+        // flush the screen
+        std::io::stdout().flush().unwrap();
+        stdin.read_line(&mut input).unwrap();
+        input
+    };
+    let mut expander = Expander::new();
+    loop {
+        print!(">> ");
+        let ast = match reader.read_with_continue(newline) {
+            Ok(ast) => ast,
+            Err(e) => {
+                println!("{e}");
+                continue;
+            }
+        };
+        println!("{ast:?}");
+
+        let ast = expander
+            .expand(
+                expander.introduce(ast.datum_to_syntax()),
+                CompileTimeEnvoirnment::new(),
+            )
+            .and_then(|ast| expander.compile(ast))
+            .and_then(|ast| expander.eval_compiled(ast));
+        match ast {
+            Ok(expr) => println!("{expr:?}"),
+            Err(e) => println!("{e}"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1059,7 +1177,7 @@ mod tests {
 
         assert_eq!(
             expander.resolve(&Syntax("lambda".into(), BTreeSet::new())),
-            None
+            Err("free variable lambda".to_string())
         );
     }
 
@@ -1070,7 +1188,7 @@ mod tests {
         println!("{expander:?}");
         assert_eq!(
             expander.resolve(&expander.introduce(Syntax("lambda".into(), BTreeSet::new()))),
-            Some(Binding::Lambda).as_ref()
+            Ok(&Binding::Lambda)
         );
     }
 }
