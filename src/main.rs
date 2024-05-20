@@ -9,6 +9,9 @@ use std::iter::Peekable;
 use std::{cell::RefCell, cmp::Ordering};
 use std::{collections::BTreeSet, rc::Rc};
 
+use syntax::Syntax;
+mod syntax;
+
 // use trace::trace;
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 struct Scope(usize);
@@ -44,8 +47,8 @@ impl UniqueNumberManager {
 }
 
 type ScopeSet = BTreeSet<Scope>;
-#[derive(Clone, PartialEq, Eq, Debug, Hash)]
-pub struct Syntax(Symbol, ScopeSet);
+// #[derive(Clone, PartialEq, Eq, Debug, Hash)]
+// pub struct Syntax(Symbol, ScopeSet);
 
 trait AdjustScope: Sized {
     fn adjust_scope(
@@ -71,22 +74,22 @@ trait AdjustScope: Sized {
     }
 }
 
-impl Syntax {
-    #[must_use]
-    pub fn new(symbol: Symbol) -> Self {
-        Self(symbol, BTreeSet::new())
-    }
-}
+// impl Syntax {
+//     #[must_use]
+//     pub fn new(symbol: Symbol) -> Self {
+//         Self(symbol, BTreeSet::new())
+//     }
+// }
 
-impl AdjustScope for Syntax {
-    fn adjust_scope(
-        self,
-        other_scope_set: Scope,
-        operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
-    ) -> Self {
-        Self(self.0, operation(self.1, other_scope_set))
-    }
-}
+// impl AdjustScope for Syntax {
+//     fn adjust_scope(
+//         self,
+//         other_scope_set: Scope,
+//         operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
+//     ) -> Self {
+//         Self(self.0, operation(self.1, other_scope_set))
+//     }
+// }
 
 pub type AnalyzedResult = Result<Box<dyn AnalyzeFn>, String>;
 pub trait AnalyzeFn: Fn(EnvRef) -> Result<Ast, String> {
@@ -153,10 +156,10 @@ impl fmt::Debug for Lambda {
     }
 }
 type Primitive = fn(Vec<Ast>) -> Result<Ast, String>;
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq,  Debug)]
 pub enum Ast {
     List(Vec<Ast>),
-    Syntax(Syntax),
+    Syntax(Box<Syntax>),
     Number(f64),
     Symbol(Symbol),
     Function(Function),
@@ -188,16 +191,16 @@ impl Ast {
             _ => self,
         }
     }
-    fn syntax_to_datum(self) -> Self {
-        match self {
-            Self::List(l) => Self::List(l.into_iter().map(Self::syntax_to_datum).collect()),
-            Self::Syntax(Syntax(s, _)) => Self::Symbol(s),
-            _ => self,
-        }
-    }
-    fn identifier(&self) -> bool {
-        matches!(self, Self::Syntax(_))
-    }
+    // fn syntax_to_datum(self) -> Self {
+    //     match self {
+    //         Self::List(l) => Self::List(l.into_iter().map(Self::syntax_to_datum).collect()),
+    //         Self::Syntax(Syntax(s, _)) => Self::Symbol(s),
+    //         _ => self,
+    //     }
+    // }
+    // fn identifier(&self) -> bool {
+//         matches!(self, Self::Syntax(_))
+//     }
 }
 
 impl AdjustScope for Ast {
