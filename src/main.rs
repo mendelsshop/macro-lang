@@ -1,6 +1,7 @@
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![deny(static_mut_refs)]
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
+use crate::scope::AdjustScope;
 use core::panic;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
@@ -10,11 +11,13 @@ use std::{cell::RefCell, cmp::Ordering};
 use std::{collections::BTreeSet, rc::Rc};
 
 use syntax::Syntax;
+use scope::Scope;
+mod scope;
 mod syntax;
 
 // use trace::trace;
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-struct Scope(usize);
+// #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+// struct Scope(usize);
 #[derive(Debug)]
 struct UniqueNumberManager(usize);
 
@@ -50,29 +53,29 @@ type ScopeSet = BTreeSet<Scope>;
 // #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 // pub struct Syntax(Symbol, ScopeSet);
 
-trait AdjustScope: Sized {
-    fn adjust_scope(
-        self,
-        other_scope: Scope,
-        operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
-    ) -> Self;
-
-    fn add_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope, |mut scopes, other_scope| {
-            scopes.insert(other_scope);
-            scopes
-        })
-    }
-
-    fn flip_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope, |mut scopes, other_scope| {
-            if !scopes.remove(&other_scope) {
-                scopes.insert(other_scope);
-            }
-            scopes
-        })
-    }
-}
+// trait AdjustScope: Sized {
+//     fn adjust_scope(
+//         self,
+//         other_scope: Scope,
+//         operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
+//     ) -> Self;
+//
+//     fn add_scope(self, other_scope: Scope) -> Self {
+//         self.adjust_scope(other_scope, |mut scopes, other_scope| {
+//             scopes.insert(other_scope);
+//             scopes
+//         })
+//     }
+//
+//     fn flip_scope(self, other_scope: Scope) -> Self {
+//         self.adjust_scope(other_scope, |mut scopes, other_scope| {
+//             if !scopes.remove(&other_scope) {
+//                 scopes.insert(other_scope);
+//             }
+//             scopes
+//         })
+//     }
+// }
 
 // impl Syntax {
 //     #[must_use]
@@ -156,11 +159,12 @@ impl fmt::Debug for Lambda {
     }
 }
 type Primitive = fn(Vec<Ast>) -> Result<Ast, String>;
-#[derive(Clone, PartialEq,  Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Ast {
     List(Vec<Ast>),
     Syntax(Box<Syntax>),
     Number(f64),
+    Boolean(bool),
     Symbol(Symbol),
     Function(Function),
 }
@@ -179,18 +183,19 @@ impl fmt::Display for Ast {
             Self::Number(n) => write!(f, "{n}"),
             Self::Symbol(s) => write!(f, "{s}"),
             Self::Function(function) => write!(f, "{function}"),
+            Self::Boolean(b) => write!(f, "{b}"),
         }
     }
 }
 impl Ast {
-    pub fn datum_to_syntax(self) -> Self {
-        match self {
-            Self::List(l) => Self::List(l.into_iter().map(Self::datum_to_syntax).collect()),
-            Self::Syntax(_) => self,
-            Self::Symbol(s) => Self::Syntax(Syntax::new(s)),
-            _ => self,
-        }
-    }
+    // pub fn datum_to_syntax(self) -> Self {
+    //     match self {
+    //         Self::List(l) => Self::List(l.into_iter().map(Self::datum_to_syntax).collect()),
+    //         Self::Syntax(_) => self,
+    //         Self::Symbol(s) => Self::Syntax(Syntax::new(s)),
+    //         _ => self,
+    //     }
+    // }
     // fn syntax_to_datum(self) -> Self {
     //     match self {
     //         Self::List(l) => Self::List(l.into_iter().map(Self::syntax_to_datum).collect()),
@@ -199,27 +204,11 @@ impl Ast {
     //     }
     // }
     // fn identifier(&self) -> bool {
-//         matches!(self, Self::Syntax(_))
-//     }
+    //         matches!(self, Self::Syntax(_))
+    //     }
 }
 
-impl AdjustScope for Ast {
-    fn adjust_scope(
-        self,
-        other_scope: Scope,
-        operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
-    ) -> Self {
-        match self {
-            Self::List(l) => Self::List(
-                l.into_iter()
-                    .map(|e| e.adjust_scope(other_scope, operation))
-                    .collect(),
-            ),
-            Self::Syntax(s) => Self::Syntax(s.adjust_scope(other_scope, operation)),
-            _ => self,
-        }
-    }
-}
+
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 enum Binding {
@@ -259,7 +248,6 @@ impl From<Binding> for Symbol {
 
 #[derive(Debug)]
 pub struct Expander<T> {
-    all_bindings: HashMap<Syntax, T>,
     core_forms: BTreeSet<Binding>,
     core_primitives: BTreeSet<Binding>,
     core_scope: Scope,
@@ -312,9 +300,7 @@ impl Expander<Binding> {
             });
         this
     }
-    fn add_binding(&mut self, id: Syntax, binding: Binding) {
-        self.all_bindings.insert(id, binding);
-    }
+    
 
     fn add_local_binding(&mut self, id: Syntax) -> Symbol {
         let symbol = self.scope_creator.gen_sym(&id.0 .0);
@@ -322,29 +308,9 @@ impl Expander<Binding> {
         symbol
     }
 
-    fn resolve(&self, id: &Syntax) -> Result<&Binding, String> {
-        let candidate_ids = self.find_all_matching_bindings(id);
-        let id = candidate_ids
-            .clone()
-            .max_by_key(|id| id.1.len())
-            .ok_or(format!("free variable {:?}", id))?;
-        if check_unambiguous(id, candidate_ids) {
-            self.all_bindings
-                .get(id)
-                .ok_or(format!("free variable {}", id.0 .0))
-        } else {
-            Err(format!("ambiguous binding {}", id.0 .0))
-        }
-    }
+    
 
-    fn find_all_matching_bindings<'a>(
-        &'a self,
-        id: &'a Syntax,
-    ) -> impl Iterator<Item = &Syntax> + Clone + 'a {
-        self.all_bindings
-            .keys()
-            .filter(move |c_id| c_id.0 == id.0 && c_id.1.is_subset(&id.1))
-    }
+    
 
     pub fn introduce<T: AdjustScope>(&self, s: T) -> T {
         s.add_scope(self.core_scope)
@@ -356,7 +322,7 @@ impl Expander<Binding> {
                 self.expand_id_application_form(l, env)
             }
             Ast::Syntax(s) => self.expand_identifier(s, env),
-            Ast::Number(_) | Ast::Function(_) => Ok(s),
+            Ast::Number(_) | Ast::Function(_) | Ast::Boolean(_) => Ok(s),
             Ast::Symbol(_) => unreachable!(),
             Ast::List(l) => self.expand_app(l, env),
         }
@@ -402,16 +368,13 @@ impl Expander<Binding> {
                 [_, _] => Ok(Ast::List(s)),
                 _ => Err(format!("bad syntax to many expression in quote {s:?}")),
             },
-            Binding::Variable(binding) => {
-                match env
-                    .lookup(binding) {
-                    Some(CompileTimeBinding::Macro(m)) => {
-                        let apply_transformer = self.apply_transformer(m, Ast::List(s));
-                        self.expand(apply_transformer?, env)
-                    }
-                    _ => self.expand_app(s, env),
+            Binding::Variable(binding) => match env.lookup(binding) {
+                Some(CompileTimeBinding::Macro(m)) => {
+                    let apply_transformer = self.apply_transformer(m, Ast::List(s));
+                    self.expand(apply_transformer?, env)
                 }
-            }
+                _ => self.expand_app(s, env),
+            },
         }
     }
 
@@ -541,7 +504,8 @@ impl Expander<Binding> {
                     Err("bad syntax cannot play with core form")?
                 }
             }
-            Ast::Number(_) | Ast::Function(_) => Ok(rhs),
+            Ast::Boolean(_) | Ast::Number(_) | Ast::Function(_) => Ok(rhs),
+
             Ast::Symbol(_) => unreachable!(),
         }
     }
@@ -567,7 +531,7 @@ fn new_env() -> Rc<RefCell<Env>> {
             let [e] = &e[..] else {
                 Err(format!("arity error: expected 1 argument, got {}", e.len()))?
             };
-            Ok(e.clone().datum_to_syntax())
+            Ok(e.clone().datum_to_syntax(None))
         })),
     );
     env.borrow_mut().define(
@@ -582,10 +546,10 @@ fn new_env() -> Rc<RefCell<Env>> {
     env.borrow_mut().define(
         Symbol("syntax-e".into(), 0),
         Ast::Function(Function::Primitive(move |e| {
-            let [Ast::Syntax(Syntax(e, _))] = &e[..] else {
+            let [Ast::Syntax(s)] = &e[..] else {
                 Err(format!("arity error: expected 1 argument, got {}", e.len()))?
             };
-            Ok(Ast::Symbol(e.clone()))
+            Ok(s.0.clone())
         })),
     );
     env.borrow_mut().define(
@@ -629,9 +593,7 @@ fn new_env() -> Rc<RefCell<Env>> {
     );
     env.borrow_mut().define(
         Symbol("list".into(), 0),
-        Ast::Function(Function::Primitive(move |e| {
-            Ok(Ast::List(e))
-        })),
+        Ast::Function(Function::Primitive(move |e| Ok(Ast::List(e)))),
     );
     env.borrow_mut().define(
         Symbol("map".into(), 0),
@@ -1045,11 +1007,6 @@ impl CompileTimeEnvoirnment {
     }
 }
 
-// TODO: return error if ambiguous
-// or maybe return error in resolve, instead of option
-fn check_unambiguous<'a>(id: &Syntax, mut candidate_ids: impl Iterator<Item = &'a Syntax>) -> bool {
-    candidate_ids.all(|c_id| c_id.1.is_subset(&id.1))
-}
 
 fn main() {
     let mut reader = Reader(String::new());
@@ -1070,7 +1027,7 @@ fn main() {
             .inspect(|e| println!("after reader: {e}"))
             .and_then(|ast| {
                 expander.expand(
-                    expander.introduce(ast.datum_to_syntax()),
+                    expander.introduce(ast.datum_to_syntax(None)),
                     CompileTimeEnvoirnment::new(),
                 )
             })
@@ -1087,9 +1044,11 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use crate::Scope;
+use crate::scope::AdjustScope;
+use std::collections::BTreeSet;
 
-    use crate::{AdjustScope, Ast, Binding, Expander, Scope, Symbol, Syntax, UniqueNumberManager};
+    use crate::{Ast, Binding, Expander,  Symbol, Syntax, UniqueNumberManager};
 
     #[test]
     fn identifier_test_with_empty_syntax() {
@@ -1099,14 +1058,14 @@ mod tests {
     #[test]
     fn datum_to_syntax_with_identifier() {
         assert_eq!(
-            Ast::Symbol(Symbol("a".into(), 0)).datum_to_syntax(),
+            Ast::Symbol(Symbol("a".into(), 0)).datum_to_syntax(None),
             Ast::Syntax(Syntax("a".into(), BTreeSet::new()))
         );
     }
 
     #[test]
     fn datum_to_syntax_with_number() {
-        assert_eq!(Ast::Number(1.0).datum_to_syntax(), Ast::Number(1.0));
+        assert_eq!(Ast::Number(1.0).datum_to_syntax(None), Ast::Number(1.0));
     }
 
     #[test]
@@ -1117,7 +1076,7 @@ mod tests {
                 Ast::Symbol(Symbol("b".into(), 0)),
                 Ast::Symbol(Symbol("c".into(), 0)),
             ])
-            .datum_to_syntax(),
+            .datum_to_syntax(None),
             Ast::List(vec![
                 Ast::Syntax(Syntax("a".into(), BTreeSet::new())),
                 Ast::Syntax(Syntax("b".into(), BTreeSet::new())),
@@ -1134,7 +1093,7 @@ mod tests {
                 Ast::Syntax(Syntax("b".into(), BTreeSet::from([Scope(0), Scope(1)]))),
                 Ast::Symbol(Symbol("c".into(), 0)),
             ])
-            .datum_to_syntax(),
+            .datum_to_syntax(None),
             Ast::List(vec![
                 Ast::Syntax(Syntax("a".into(), BTreeSet::new())),
                 Ast::Syntax(Syntax("b".into(), BTreeSet::from([Scope(0), Scope(1)]))),
@@ -1200,7 +1159,7 @@ mod tests {
                 Ast::Symbol(Symbol("x".into(), 0)),
                 Ast::Symbol(Symbol("y".into(), 0)),
             ])
-            .datum_to_syntax()
+            .datum_to_syntax(None)
             .add_scope(sc1),
             Ast::List(vec![
                 Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1]))),
