@@ -52,24 +52,24 @@ impl AdjustScope for Ast {
                     .map(|e| e.adjust_scope(other_scope, operation))
                     .collect(),
             ),
-            Self::Syntax(s) => Self::Syntax(s.adjust_scope(other_scope, operation)),
+            Self::Syntax(s) => Self::Syntax(Box::new(s.adjust_scope(other_scope, operation))),
             _ => self,
         }
     }
 }
-pub struct AllBindings(HashMap<Syntax<Symbol>, Binding>);
+#[derive(Debug)]
+pub struct AllBindings(pub HashMap<Syntax<Symbol>, Binding>);
 
 impl AllBindings {
     // we could take a plain syntax<symbol> here to
-    fn add_binding(&mut self, id: Ast, binding: Binding) -> bool {
-        let Ast::Syntax(s) = id else {
-            return false
-        };
-        let Ast::
-        self.0.insert(id, binding);
-        true
+    pub fn add_binding(
+        &mut self,
+        id: Syntax<Symbol>,
+        binding: Binding,
+    )  {
+       self.0.insert(id, binding);
     }
-    fn resolve(&self, id: &Syntax<Symbol>) -> Result<&Binding, String> {
+    pub fn resolve(&self, id: &Syntax<Symbol>) -> Result<&Binding, String> {
         let candidate_ids = self.find_all_matching_bindings(id);
         let id = candidate_ids
             .clone()
@@ -92,6 +92,9 @@ impl AllBindings {
 }
 // TODO: return error if ambiguous
 // or maybe return error in resolve, instead of option
-fn check_unambiguous<'a>(id: &Syntax<Symbol>, mut candidate_ids: impl Iterator<Item = &'a Syntax<Symbol>>) -> bool {
+fn check_unambiguous<'a>(
+    id: &Syntax<Symbol>,
+    mut candidate_ids: impl Iterator<Item = &'a Syntax<Symbol>>,
+) -> bool {
     candidate_ids.all(|c_id| c_id.1.is_subset(&id.1))
 }

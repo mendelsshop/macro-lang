@@ -10,8 +10,8 @@ use std::iter::Peekable;
 use std::{cell::RefCell, cmp::Ordering};
 use std::{collections::BTreeSet, rc::Rc};
 
+use scope::{AllBindings, Scope};
 use syntax::Syntax;
-use scope::Scope;
 mod scope;
 mod syntax;
 
@@ -162,7 +162,7 @@ type Primitive = fn(Vec<Ast>) -> Result<Ast, String>;
 #[derive(Clone, PartialEq, Debug)]
 pub enum Ast {
     List(Vec<Ast>),
-    Syntax(Box<Syntax>),
+    Syntax(Box<Syntax<Ast>>),
     Number(f64),
     Boolean(bool),
     Symbol(Symbol),
@@ -208,8 +208,6 @@ impl Ast {
     //     }
 }
 
-
-
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 enum Binding {
     Lambda,
@@ -252,6 +250,7 @@ pub struct Expander<T> {
     core_primitives: BTreeSet<Binding>,
     core_scope: Scope,
     scope_creator: UniqueNumberManager,
+    all_bindings: AllBindings,
     env: EnvRef,
 }
 
@@ -286,31 +285,27 @@ impl Expander<Binding> {
             core_scope,
             core_primitives,
             core_forms,
-            all_bindings: HashMap::new(),
+            all_bindings: AllBindings(HashMap::new()),
             env: new_env(),
         };
         this.core_forms
             .clone()
             .union(&this.core_primitives.clone())
             .for_each(|core| {
-                this.add_binding(
+                this.all_bindings.add_binding(
                     Syntax(core.clone().into(), BTreeSet::from([this.core_scope])),
                     core.clone(),
                 );
             });
         this
     }
-    
 
-    fn add_local_binding(&mut self, id: Syntax) -> Symbol {
+    fn add_local_binding(&mut self, id: Syntax<Symbol>) -> Symbol {
         let symbol = self.scope_creator.gen_sym(&id.0 .0);
-        self.add_binding(id, Binding::Variable(symbol.clone()));
+        self.all_bindings
+            .add_binding(id, Binding::Variable(symbol.clone()));
         symbol
     }
-
-    
-
-    
 
     pub fn introduce<T: AdjustScope>(&self, s: T) -> T {
         s.add_scope(self.core_scope)
@@ -318,7 +313,7 @@ impl Expander<Binding> {
 
     pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
         match s {
-            Ast::List(l) if matches!(&l[..], [Ast::Syntax(_), ..]) => {
+            Ast::List(l) if matches!(&l[..], [s, ..] if s.identifier()) => {
                 self.expand_id_application_form(l, env)
             }
             Ast::Syntax(s) => self.expand_identifier(s, env),
@@ -329,7 +324,7 @@ impl Expander<Binding> {
     }
 
     fn expand_identifier(&self, s: Syntax, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        let binding = self.resolve(&s)?;
+        let binding = self.all_bindings.resolve(&s)?;
         if self.core_forms.contains(binding) {
             Err(format!("bad syntax dangling core form {}", s.0))
         } else if self.core_primitives.contains(binding) {
@@ -357,10 +352,9 @@ impl Expander<Binding> {
         s: Vec<Ast>,
         env: CompileTimeEnvoirnment,
     ) -> Result<Ast, String> {
-        let Some(Ast::Syntax(id)) = s.first() else {
-            unreachable!()
-        };
-        let binding = self.resolve(id)?;
+        let Some(a) = s.first() else { unreachable!() };
+        // let try_into = TryFrom::<Syntax<Ast>>::try_from(a)?;
+        let binding = self.all_bindings.resolve(&(*a).clone().try_into()?)?;
         match binding {
             Binding::Lambda => self.expand_lambda(s, env),
             Binding::LetSyntax => self.expand_let_syntax(s, env),
@@ -1007,7 +1001,6 @@ impl CompileTimeEnvoirnment {
     }
 }
 
-
 fn main() {
     let mut reader = Reader(String::new());
     let newline = || {
@@ -1044,11 +1037,11 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use crate::scope::AdjustScope;
     use crate::Scope;
-use crate::scope::AdjustScope;
-use std::collections::BTreeSet;
+    use std::collections::BTreeSet;
 
-    use crate::{Ast, Binding, Expander,  Symbol, Syntax, UniqueNumberManager};
+    use crate::{Ast, Binding, Expander, Symbol, Syntax, UniqueNumberManager};
 
     #[test]
     fn identifier_test_with_empty_syntax() {

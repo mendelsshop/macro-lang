@@ -1,7 +1,6 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::BTreeSet,
     fmt::Debug,
-    hash::Hash,
 };
 
 use crate::{Ast, Binding, Scope, Symbol};
@@ -9,13 +8,16 @@ use crate::{Ast, Binding, Scope, Symbol};
 type ScopeSet = BTreeSet<Scope>;
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub struct Syntax<T: Clone + PartialEq + Debug>(pub T, pub ScopeSet);
+impl TryFrom<Ast> for Syntax<Symbol> {
+    type Error = String;
 
-// impl<T: Clone + PartialEq + Debug + Hash> Hash for Syntax<T> {
-//     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-//         self.0.hash(state);
-//         self.1.hash(state);
-//     }
-// }
+    fn try_from(value: Ast) -> Result<Self, Self::Error> {
+        let Ast::Syntax(s) = value else { return Err("not a syntax object".to_string()) };
+        let Ast::Symbol(id) = s.0 else { return Err("not a syntax object wrapping a symbol" .to_string())};
+        Ok(Syntax(id, s.1))
+    }
+}
+
 const EMPTY_SCOPE: BTreeSet<Scope> = ScopeSet::new();
 const EMPTY_SYNTAX: Syntax<Ast> = Syntax(Ast::Boolean(false), EMPTY_SCOPE);
 
