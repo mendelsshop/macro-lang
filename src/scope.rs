@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use crate::{syntax::Syntax, Ast, Binding, ScopeSet, Symbol};
+use crate::{syntax::Syntax, Ast, Binding, Expander, ScopeSet, Symbol};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Scope(pub usize);
@@ -57,17 +55,15 @@ impl AdjustScope for Ast {
         }
     }
 }
-#[derive(Debug)]
-pub struct AllBindings(pub HashMap<Syntax<Symbol>, Binding>);
 
-impl AllBindings {
+impl Expander {
     // we could take a plain syntax<symbol> here to
     pub fn add_binding(
         &mut self,
         id: Syntax<Symbol>,
         binding: Binding,
     )  {
-       self.0.insert(id, binding);
+       self.all_bindings.insert(id, binding);
     }
     pub fn resolve(&self, id: &Syntax<Symbol>) -> Result<&Binding, String> {
         let candidate_ids = self.find_all_matching_bindings(id);
@@ -76,7 +72,7 @@ impl AllBindings {
             .max_by_key(|id| id.1.len())
             .ok_or(format!("free variable {:?}", id))?;
         if check_unambiguous(id, candidate_ids) {
-            self.0.get(id).ok_or(format!("free variable {}", id.0 .0))
+            self.all_bindings.get(id).ok_or(format!("free variable {}", id.0 .0))
         } else {
             Err(format!("ambiguous binding {}", id.0 .0))
         }
@@ -85,7 +81,7 @@ impl AllBindings {
         &'a self,
         id: &'a Syntax<Symbol>,
     ) -> impl Iterator<Item = &Syntax<Symbol>> + Clone + 'a {
-        self.0
+        self.all_bindings
             .keys()
             .filter(move |c_id| c_id.0 == id.0 && c_id.1.is_subset(&id.1))
     }
