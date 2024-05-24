@@ -1,4 +1,4 @@
-use crate::{syntax::Syntax, Expander, Function, Symbol};
+use crate::{syntax::Syntax, Ast, Expander, Function, Symbol};
 use std::{collections::HashMap, fmt, rc::Rc};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -31,7 +31,11 @@ impl From<Binding> for Symbol {
 pub enum CompileTimeBinding {
     Variable,
     Procedure(Function),
+    // maybe this should just be Function
+    // as we need to capture expander state
+    CoreForm(CoreForm),
 }
+pub type CoreForm = fn(&mut Expander, Ast, CompileTimeEnvoirnment) -> Result<Ast, String>;
 #[derive(Clone)]
 pub struct CompileTimeEnvoirnment(HashMap<Symbol, CompileTimeBinding>);
 
@@ -50,13 +54,13 @@ impl CompileTimeEnvoirnment {
         &self,
         key: &Binding,
         // TODO: maybe core form can get their own type
-        core_forms: HashMap<Rc<str>, Function>,
+        core_forms: HashMap<Rc<str>, CoreForm>
     ) -> Option<CompileTimeBinding> {
         match key {
             Binding::Variable(key) => self.0.get(key).cloned(),
             Binding::CoreBinding(core) => Some(core_forms
                 .get(core)
-                .map(|f| CompileTimeBinding::Procedure(f.clone()))
+                .map(|f| CompileTimeBinding::CoreForm(f.clone()))
                 .unwrap_or(CompileTimeBinding::Variable)),
         }
     }
