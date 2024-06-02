@@ -1,9 +1,9 @@
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![deny(static_mut_refs)]
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
+use crate::binding::Binding;
 use crate::binding::CompileTimeBinding;
 use crate::binding::CompileTimeEnvoirnment;
-use crate::binding::Binding;
 use crate::scope::AdjustScope;
 use core::panic;
 use std::collections::HashMap;
@@ -17,9 +17,9 @@ use scope::Scope;
 use syntax::Syntax;
 mod binding;
 mod expand;
+mod r#match;
 mod scope;
 mod syntax;
-mod r#match;
 
 // use trace::trace;
 // #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -194,6 +194,25 @@ impl fmt::Display for Ast {
     }
 }
 impl Ast {
+    pub fn list_with_length(self, length: usize) -> Result<Vec<Ast>, Ast> {
+        match self {
+            Self::List(l) if l.len() == length => Ok(l),
+            _ => Err(self),
+        }
+    }
+
+    fn is_keyword(&self) -> bool {
+        // https://docs.racket-lang.org/guide/keywords.html
+        false
+    }
+
+    pub fn to_synax_list(self) -> Self {
+        match self {
+            Self::List(l) => Self::List(l.into_iter().map(Self::to_synax_list).collect()),
+            Self::Syntax(s) => s.0.to_synax_list(),
+            _ => self
+        }
+    }
     // pub fn datum_to_syntax(self) -> Self {
     //     match self {
     //         Self::List(l) => Self::List(l.into_iter().map(Self::datum_to_syntax).collect()),
@@ -269,8 +288,6 @@ impl Expander {
             });
         this
     }
-
-    
 
     pub fn introduce<T: AdjustScope>(&self, s: T) -> T {
         s.add_scope(self.core_scope)
@@ -940,8 +957,6 @@ impl From<&str> for Symbol {
         Self(value.into(), 0)
     }
 }
-
-
 
 fn main() {
     let mut reader = Reader(String::new());
