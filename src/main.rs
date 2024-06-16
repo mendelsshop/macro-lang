@@ -12,6 +12,7 @@ mod r#match;
 mod scope;
 mod syntax;
 mod core;
+mod compile;
 
 // use trace::trace;
 // #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

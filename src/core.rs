@@ -14,16 +14,16 @@ impl Expander {
             Binding::CoreBinding(sym.0),
         );
     }
-    fn add_core_form(&mut self, sym: Rc<str>, proc: CoreForm) {
+    pub fn add_core_form(&mut self, sym: Rc<str>, proc: CoreForm) {
         self.add_core_binding(sym.clone().into());
         self.core_forms.insert(sym, proc);
     }
-    fn add_core_primitive(&mut self, sym: Rc<str>, proc: Function) {
+    pub fn add_core_primitive(&mut self, sym: Rc<str>, proc: Function) {
         self.add_core_binding(sym.clone().into());
         self.core_primitives.insert(sym, proc);
     }
 
-    fn core_form_symbol(&mut self, s: Ast) -> Result<Rc<str>, String> {
+    pub fn core_form_symbol(&mut self, s: Ast) -> Result<Rc<str>, String> {
         try_match_syntax(
             s,
             Ast::List(vec![Ast::Symbol("id".into()), Ast::Symbol("_".into())]),
