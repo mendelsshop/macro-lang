@@ -1,25 +1,17 @@
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![deny(static_mut_refs)]
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
-use crate::binding::Binding;
-use crate::binding::CompileTimeBinding;
-use crate::binding::CompileTimeEnvoirnment;
-use crate::scope::AdjustScope;
-use core::panic;
-use std::collections::HashMap;
-use std::fmt::{self, Debug};
-use std::io::{BufRead, BufReader, Write};
-use std::iter::Peekable;
-use std::{cell::RefCell, cmp::Ordering};
-use std::{collections::BTreeSet, rc::Rc};
-
-use scope::Scope;
+use scope::{AdjustScope, Scope};
 use syntax::Syntax;
+use binding::{Binding, CompileTimeBinding, CompileTimeEnvoirnment, CoreForm};
+use std::{cell::RefCell, cmp::Ordering, collections::{BTreeSet, HashMap, HashSet}, fmt::{self, Debug}, io::{BufRead, BufReader, Write}, iter::Peekable, rc::Rc};
+
 mod binding;
 mod expand;
 mod r#match;
 mod scope;
 mod syntax;
+mod core;
 
 // use trace::trace;
 // #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -235,12 +227,13 @@ impl Ast {
 
 #[derive(Debug)]
 pub struct Expander {
-    core_forms: BTreeSet<Binding>,
-    core_primitives: BTreeSet<Binding>,
+    core_forms: HashMap<Rc<str>, CoreForm>,
+    core_primitives: HashMap<Rc<str>, Function>,
     core_scope: Scope,
     scope_creator: UniqueNumberManager,
     all_bindings: HashMap<Syntax<Symbol>, Binding>,
     env: EnvRef,
+    core_syntax: Syntax<Ast>
 }
 
 impl Default for Expander {
@@ -261,15 +254,16 @@ impl Expander {
             Binding::QuoteSyntax,
         ]);
         let core_primitives = BTreeSet::from([
-            Binding::Variable("datum->syntax".into()),
-            Binding::Variable("syntax->datum".into()),
-            Binding::Variable("list".into()),
-            Binding::Variable("cons".into()),
-            Binding::Variable("car".into()),
-            Binding::Variable("cdr".into()),
-            Binding::Variable("map".into()),
+            Binding::CoreBinding("datum->syntax".into()),
+            Binding::CoreBinding("syntax->datum".into()),
+            Binding::CoreBinding("list".into()),
+            Binding::CoreBinding("cons".into()),
+            Binding::CoreBinding("car".into()),
+            Binding::CoreBinding("cdr".into()),
+            Binding::CoreBinding("map".into()),
         ]);
         let mut this = Self {
+            core_syntax: Syntax(Ast::Boolean(false)  , BTreeSet::from([ core_scope])),
             scope_creator,
             core_scope,
             core_primitives,

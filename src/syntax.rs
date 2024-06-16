@@ -3,7 +3,7 @@ use std::{
     fmt::Debug,
 };
 
-use crate::{Ast, Binding, Scope, Symbol};
+use crate::{Ast, Scope, Symbol};
 
 type ScopeSet = BTreeSet<Scope>;
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
