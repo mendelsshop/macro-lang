@@ -1,12 +1,17 @@
-use crate::{binding::Binding, syntax::Syntax, Ast, Expander, Function, Symbol};
+use crate::{binding::Binding, r#match::match_syntax, syntax::Syntax, Ast, Expander, Function, Symbol};
 
 impl Expander {
-    pub fn compile(&mut self, s: Syntax<Ast>) -> Result<Ast, String> {
-        match s.0 {
+    pub fn compile(&mut self, s: Ast) -> Result<Ast, String> {
+        match s {
             Ast::List(_) => {
-                let core_sym = self.core_form_symbol(s.clone().0).map_err(|_| format!("not a core form {}", s.0))?;
+                let core_sym = self.core_form_symbol(s.clone()).map_err(|_| format!("not a core form {}", s))?;
                 match core_sym.to_string().as_str() {
-                    "lambda" => todo!(),
+                    "lambda" => {
+                        let m = match_syntax(s, Ast::List(vec![ Ast::List(vec!["id".into(), "...".into()], ), "body".into()]))?;
+                        let id = m("id".into());
+                        let id = m("body".into());
+
+                    },
                     "#%app" => todo!(),
                     "quote" => todo!(),
                     "quote-syntax" => todo!(),
@@ -26,11 +31,10 @@ impl Expander {
                         .map( Ast::Function),
                 }
             }
-            _ => Err(format!("bad syntax after expansion {}", s.0)),
+            _ => Err(format!("bad syntax after expansion {}", s)),
         }
     }
 }
-
 fn key_to_symbol(key: Symbol) -> Symbol {
     key
 }

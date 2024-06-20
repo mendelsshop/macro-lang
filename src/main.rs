@@ -1,18 +1,26 @@
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![deny(static_mut_refs)]
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
-use scope::{AdjustScope, Scope};
-use syntax::Syntax;
 use binding::{Binding, CompileTimeBinding, CompileTimeEnvoirnment, CoreForm};
-use std::{cell::RefCell, cmp::Ordering, collections::{BTreeSet, HashMap, HashSet}, fmt::{self, Debug}, io::{BufRead, BufReader, Write}, iter::Peekable, rc::Rc};
+use scope::{AdjustScope, Scope};
+use std::{
+    cell::RefCell,
+    cmp::Ordering,
+    collections::{BTreeSet, HashMap, HashSet},
+    fmt::{self, Debug},
+    io::{BufRead, BufReader, Write},
+    iter::Peekable,
+    rc::Rc,
+};
+use syntax::Syntax;
 
 mod binding;
+mod compile;
+mod core;
 mod expand;
 mod r#match;
 mod scope;
 mod syntax;
-mod core;
-mod compile;
 
 // use trace::trace;
 // #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -203,7 +211,7 @@ impl Ast {
         match self {
             Self::List(l) => Self::List(l.into_iter().map(Self::to_synax_list).collect()),
             Self::Syntax(s) => s.0.to_synax_list(),
-            _ => self
+            _ => self,
         }
     }
     // pub fn datum_to_syntax(self) -> Self {
@@ -234,7 +242,7 @@ pub struct Expander {
     scope_creator: UniqueNumberManager,
     all_bindings: HashMap<Syntax<Symbol>, Binding>,
     env: EnvRef,
-    core_syntax: Syntax<Ast>
+    core_syntax: Syntax<Ast>,
 }
 
 impl Default for Expander {
@@ -264,7 +272,7 @@ impl Expander {
             Binding::CoreBinding("map".into()),
         ]);
         let mut this = Self {
-            core_syntax: Syntax(Ast::Boolean(false)  , BTreeSet::from([ core_scope])),
+            core_syntax: Syntax(Ast::Boolean(false), BTreeSet::from([core_scope])),
             scope_creator,
             core_scope,
             core_primitives,
@@ -953,6 +961,11 @@ impl From<&str> for Symbol {
     }
 }
 
+impl From<&str> for Ast {
+    fn from(value: &str) -> Self {
+        Ast::Symbol(value.into())
+    }
+}
 fn main() {
     let mut reader = Reader(String::new());
     let newline = || {
