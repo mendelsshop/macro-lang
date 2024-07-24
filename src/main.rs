@@ -182,6 +182,77 @@ pub enum Ast {
     Function(Function),
 }
 
+#[derive(Clone)]
+pub struct Fix {
+    pub out: Box<AstF<Fix>>,
+}
+impl Fix {
+    pub fn new(out: Box<AstF<Fix>>) -> Self {
+        Self { out }
+    }
+
+    pub fn bottom_up(self, f: &mut impl FnMut(Fix) -> Fix) -> Fix {
+        // TODO: report bug where inling x results in immutable borrow error
+        //let x = self.out.map(|x| Self::bottom_up(x, f));
+        //f(Fix::new(Box::new(x)))
+        self.catamorphism(&mut |x| f(Fix::new(Box::new(x))))
+    }
+    pub fn top_down(self, f: &mut impl FnMut(Fix) -> Fix) -> Fix {
+        //Fix::new(Box::new(f(self).out.map(|x| x.top_down(f))))
+        Self::anamorphism(self, &mut |x| *f(x).out)
+    }
+
+    pub fn catamorphism<A>(self, algebra: &mut impl FnMut(AstF<A>) -> A) -> A {
+        let mapped = self.out.map(|subterm| subterm.catamorphism(algebra));
+        algebra(mapped)
+    }
+    pub fn anamorphism<A>(term: A, coalgebra: &mut impl FnMut(A) -> AstF<A>) -> Fix {
+        Fix::new(Box::new(
+            coalgebra(term).map(|subterm| Self::anamorphism(subterm, coalgebra)),
+        ))
+    }
+    pub fn hylo<A, B>(
+        term: A,
+        algebra: &mut impl FnMut(AstF<B>) -> B,
+        coalgebra: &mut impl FnMut(A) -> AstF<A>,
+    ) -> B {
+        let unfolded = coalgebra(term);
+        let mapped = unfolded.map(|subterm| Self::hylo(subterm, algebra, coalgebra));
+        algebra(mapped)
+    }
+    pub fn metamorphism<A>(
+        self,
+        algebra: &mut impl FnMut(AstF<A>) -> A,
+        coalgebra: &mut impl FnMut(A) -> AstF<A>,
+    ) -> Self {
+        let folded = self.catamorphism(algebra);
+        Self::anamorphism(folded, coalgebra)
+    }
+}
+#[derive(Clone, PartialEq, Debug)]
+pub enum AstF<A> {
+    Pair(A, A),
+    TheEmptyList,
+    Syntax(Syntax),
+    Number(f64),
+    Symbol(Symbol),
+    Function(Function),
+}
+impl<A> AstF<A> {
+    fn map<B, F>(self, mut f: F) -> AstF<B>
+    where
+        F: FnMut(A) -> B,
+    {
+        match self {
+            AstF::Pair(car, cdr) => AstF::Pair(f(car), f(cdr)),
+            AstF::TheEmptyList => AstF::TheEmptyList,
+            AstF::Syntax(syntax) => AstF::Syntax(syntax),
+            AstF::Number(number) => AstF::Number(number),
+            AstF::Symbol(symbol) => AstF::Symbol(symbol),
+            AstF::Function(function) => AstF::Function(function),
+        }
+    }
+}
 impl fmt::Display for Ast {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
