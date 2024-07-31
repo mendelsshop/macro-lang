@@ -162,12 +162,12 @@ impl Pair {
     pub fn map(&self, mut f: impl FnMut(Ast) -> Result<Ast, String>) -> Result<Ast, String> {
         let car = f(self.0.clone())?;
         let cdr = self.1.map(f)?;
-        Ok(Ast::Pair(Box::new(Pair(car, cdr))))
+        Ok(Ast::Pair(Box::new(Self(car, cdr))))
     }
-    pub fn list(&self) -> bool {
+    #[must_use] pub fn list(&self) -> bool {
         self.1.list()
     }
-    pub fn size(&self) -> usize {
+    #[must_use] pub fn size(&self) -> usize {
         1 + self.1.size()
     }
 }
@@ -182,22 +182,26 @@ pub enum Ast {
     Function(Function),
 }
 
+fn bound_identifier(a: Ast, b: Ast) -> bool {
+    matches!((a, b), (Ast::Syntax(a), Ast::Syntax(b)) if a == b)
+}
+
 #[derive(Clone)]
 pub struct Fix {
     pub out: Box<AstF<Fix>>,
 }
 impl Fix {
-    pub fn new(out: Box<AstF<Fix>>) -> Self {
+    #[must_use] pub fn new(out: Box<AstF<Self>>) -> Self {
         Self { out }
     }
 
-    pub fn bottom_up(self, f: &mut impl FnMut(Fix) -> Fix) -> Fix {
+    pub fn bottom_up(self, f: &mut impl FnMut(Self) -> Self) -> Self {
         // TODO: report bug where inling x results in immutable borrow error
         //let x = self.out.map(|x| Self::bottom_up(x, f));
         //f(Fix::new(Box::new(x)))
-        self.catamorphism(&mut |x| f(Fix::new(Box::new(x))))
+        self.catamorphism(&mut |x| f(Self::new(Box::new(x))))
     }
-    pub fn top_down(self, f: &mut impl FnMut(Fix) -> Fix) -> Fix {
+    pub fn top_down(self, f: &mut impl FnMut(Self) -> Self) -> Self {
         //Fix::new(Box::new(f(self).out.map(|x| x.top_down(f))))
         Self::anamorphism(self, &mut |x| *f(x).out)
     }
@@ -206,8 +210,8 @@ impl Fix {
         let mapped = self.out.map(|subterm| subterm.catamorphism(algebra));
         algebra(mapped)
     }
-    pub fn anamorphism<A>(term: A, coalgebra: &mut impl FnMut(A) -> AstF<A>) -> Fix {
-        Fix::new(Box::new(
+    pub fn anamorphism<A>(term: A, coalgebra: &mut impl FnMut(A) -> AstF<A>) -> Self {
+        Self::new(Box::new(
             coalgebra(term).map(|subterm| Self::anamorphism(subterm, coalgebra)),
         ))
     }
@@ -244,12 +248,12 @@ impl<A> AstF<A> {
         F: FnMut(A) -> B,
     {
         match self {
-            AstF::Pair(car, cdr) => AstF::Pair(f(car), f(cdr)),
-            AstF::TheEmptyList => AstF::TheEmptyList,
-            AstF::Syntax(syntax) => AstF::Syntax(syntax),
-            AstF::Number(number) => AstF::Number(number),
-            AstF::Symbol(symbol) => AstF::Symbol(symbol),
-            AstF::Function(function) => AstF::Function(function),
+            Self::Pair(car, cdr) => AstF::Pair(f(car), f(cdr)),
+            Self::TheEmptyList => AstF::TheEmptyList,
+            Self::Syntax(syntax) => AstF::Syntax(syntax),
+            Self::Number(number) => AstF::Number(number),
+            Self::Symbol(symbol) => AstF::Symbol(symbol),
+            Self::Function(function) => AstF::Function(function),
         }
     }
 }
@@ -259,11 +263,11 @@ impl fmt::Display for Ast {
             Self::Pair(pair) => {
                 let mut string = pair.0.to_string();
                 let mut second = pair.1.clone();
-                while let Ast::Pair(pair) = second {
+                while let Self::Pair(pair) = second {
                     string = format!("{string} {}", pair.0);
                     second = pair.1;
                 }
-                if second != Ast::TheEmptyList {
+                if second != Self::TheEmptyList {
                     string = format!("{string} . {second}");
                 }
                 write!(f, "({string})")
@@ -277,24 +281,24 @@ impl fmt::Display for Ast {
     }
 }
 impl Ast {
-    pub fn size(&self) -> usize {
+    #[must_use] pub fn size(&self) -> usize {
         match self {
-            Ast::Pair(p) => p.size(),
+            Self::Pair(p) => p.size(),
             _ => 0,
         }
     }
-    pub fn map(&self, f: impl FnMut(Ast) -> Result<Ast, String>) -> Result<Ast, String> {
+    pub fn map(&self, f: impl FnMut(Self) -> Result<Self, String>) -> Result<Self, String> {
         match self {
             Self::Pair(p) => p.map(f),
             Self::TheEmptyList => Ok(Self::TheEmptyList),
             bad => Err(format!("cannot map {bad}")),
         }
     }
-    pub fn list(&self) -> bool {
-        matches!(self,  Ast::Pair(p) if p.list() ) || *self == Ast::TheEmptyList
+    #[must_use] pub fn list(&self) -> bool {
+        matches!(self,  Self::Pair(p) if p.list() ) || *self == Self::TheEmptyList
     }
 
-    pub fn datum_to_syntax(self) -> Self {
+    #[must_use] pub fn datum_to_syntax(self) -> Self {
         match self {
             list if list.list() => list.map(|x| Ok(x.datum_to_syntax())).unwrap_or(list),
             Self::Syntax(_) => self,
@@ -436,7 +440,7 @@ impl Expander<Binding> {
         let id = candidate_ids
             .clone()
             .max_by_key(|id| id.1.len())
-            .ok_or(format!("free variable {:?}", id))?;
+            .ok_or(format!("free variable {id:?}"))?;
         if check_unambiguous(id, candidate_ids) {
             self.all_bindings
                 .get(id)
@@ -444,6 +448,10 @@ impl Expander<Binding> {
         } else {
             Err(format!("ambiguous binding {}", id.0 .0))
         }
+    }
+
+    fn free_identifier(&self, a: Ast, b: Ast) -> bool {
+        matches!((a, b), (Ast::Syntax(a), Ast::Syntax(b)) if self.resolve( &a).is_ok_and(|a| self.resolve(&b).is_ok_and(|b| a == b )))
     }
 
     fn find_all_matching_bindings<'a>(
@@ -486,7 +494,7 @@ impl Expander<Binding> {
             };
             let v = env
                 .lookup(binding)
-                .ok_or(format!("out of context {:?}", s))?;
+                .ok_or(format!("out of context {s:?}"))?;
             if let CompileTimeBinding::Symbol(_) = v {
                 Ok(Ast::Syntax(s))
             } else {
@@ -573,8 +581,7 @@ impl Expander<Binding> {
         };
         let Pair(Ast::Pair(ref binder_list), Ast::TheEmptyList) = **binder_list else {
             Err(format!(
-                "invalid syntax {s:?}, bad binder list for let-syntax {:?}",
-                binder_list
+                "invalid syntax {s:?}, bad binder list for let-syntax {binder_list:?}"
             ))?
         };
         let Pair(Ast::Syntax(ref lhs_id), Ast::Pair(ref rhs_list)) = **binder_list else {
@@ -584,21 +591,19 @@ impl Expander<Binding> {
         };
         let Pair(ref rhs, Ast::TheEmptyList) = **rhs_list else {
             Err(format!(
-                "invalid syntax {s:?}, bad binder list for let-syntax {:?}",
-                rhs_list
+                "invalid syntax {s:?}, bad binder list for let-syntax {rhs_list:?}"
             ))?
         };
         let Pair(ref body, Ast::TheEmptyList) = **body else {
             Err(format!(
-                "invalid syntax {s:?}, bad binder list for let-syntax {:?}",
-                body
+                "invalid syntax {s:?}, bad binder list for let-syntax {body:?}"
             ))?
         };
         let sc = self.scope_creator.new_scope();
         let id = lhs_id.clone().add_scope(sc);
         let binding = self.add_local_binding(id);
         let rhs_val = self.eval_for_syntax_binding(rhs.clone())?;
-        let body_env = env.extend(binding.clone(), rhs_val);
+        let body_env = env.extend(binding, rhs_val);
         //println!("found macro {binding}");
         //println!("expand {body} in {body_env:?}");
         self.expand(body.clone().add_scope(sc), body_env)
@@ -723,7 +728,7 @@ fn new_env() -> Rc<RefCell<Env>> {
                     e.size()
                 ))?
             };
-            Ok(e.clone().datum_to_syntax())
+            Ok(e.datum_to_syntax())
         })),
     );
     env.borrow_mut().define(
@@ -741,7 +746,7 @@ fn new_env() -> Rc<RefCell<Env>> {
                     e.size()
                 ))?
             };
-            Ok(e.clone().syntax_to_datum())
+            Ok(e.syntax_to_datum())
         })),
     );
     env.borrow_mut().define(
@@ -759,7 +764,7 @@ fn new_env() -> Rc<RefCell<Env>> {
                     e.size()
                 ))?
             };
-            Ok(Ast::Symbol(e.clone()))
+            Ok(Ast::Symbol(e))
         })),
     );
     env.borrow_mut().define(
@@ -803,7 +808,7 @@ fn new_env() -> Rc<RefCell<Env>> {
                 ))?
             };
             let Pair(fst, _) = *e;
-            Ok(fst.clone())
+            Ok(fst)
         })),
     );
     env.borrow_mut().define(
@@ -823,12 +828,12 @@ fn new_env() -> Rc<RefCell<Env>> {
                 ))?
             };
             let Pair(_, snd) = *e;
-            Ok(snd.clone())
+            Ok(snd)
         })),
     );
     env.borrow_mut().define(
         Symbol("list".into(), 0),
-        Ast::Function(Function::Primitive(move |e| Ok(e))),
+        Ast::Function(Function::Primitive(Ok)),
     );
     env.borrow_mut().define(
         Symbol("map".into(), 0),
@@ -909,7 +914,7 @@ impl Env {
                     match (params, args) {
                         (Ast::Pair(param), Ast::Pair(arg)) => {
                             let Ast::Symbol(p) = param.0 else {
-                                return Some(format!(""));
+                                return Some(String::new());
                             };
                             env.borrow_mut().define(p, arg.0);
                             extend_envoirnment(env, param.1, arg.1)
@@ -960,7 +965,7 @@ impl Evaluator {
                     Ok(Ast::Function(Function::Lambda(Lambda(
                         Box::new(Ast::Pair(body.clone())),
                         env,
-                        Box::new(args.clone()),
+                        Box::new(args),
                     ))))
                 }
                 Ast::Symbol(Symbol(quote, 0)) if *quote == *"quote" => {
@@ -973,9 +978,9 @@ impl Evaluator {
                     Ok(datum)
                 }
                 f => {
-                    let f = Self::eval(f.clone(), env.clone())?;
+                    let f = Self::eval(f, env.clone())?;
                     let rest = list.1.map(|arg| Self::eval(arg, env.clone()))?;
-                    Self::execute_application(f, rest.clone())
+                    Self::execute_application(f, rest)
                 } //Ast::TheEmptyList => Err(format!("bad syntax {list:?}, empty application")),
             },
             Ast::Symbol(s) =>
@@ -1002,10 +1007,10 @@ impl Evaluator {
 
     fn eval_sequence(body: Ast, env: Rc<RefCell<Env>>) -> Result<Ast, String> {
         let Ast::Pair(pair) = body else {
-            return Err(format!("not a sequence {}", body));
+            return Err(format!("not a sequence {body}"));
         };
         if pair.1 == Ast::TheEmptyList {
-            Self::eval(pair.0, env.clone())
+            Self::eval(pair.0, env)
         } else {
             Self::eval(pair.0, env.clone())?;
             Self::eval_sequence(pair.1, env)
@@ -1230,7 +1235,7 @@ impl Reader {
 
     fn read_symbol_inner(mut input: Input) -> (String, Input) {
         let mut str = String::new();
-        while let Some(char) = input.peek().cloned() {
+        while let Some(char) = input.peek().copied() {
             if char.is_whitespace() || ['(', ')', ';', '"', '\''].contains(&char) {
                 break;
             }
