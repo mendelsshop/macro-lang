@@ -164,10 +164,12 @@ impl Pair {
         let cdr = self.1.map(f)?;
         Ok(Ast::Pair(Box::new(Self(car, cdr))))
     }
-    #[must_use] pub fn list(&self) -> bool {
+    #[must_use]
+    pub fn list(&self) -> bool {
         self.1.list()
     }
-    #[must_use] pub fn size(&self) -> usize {
+    #[must_use]
+    pub fn size(&self) -> usize {
         1 + self.1.size()
     }
 }
@@ -191,7 +193,8 @@ pub struct Fix {
     pub out: Box<AstF<Fix>>,
 }
 impl Fix {
-    #[must_use] pub fn new(out: Box<AstF<Self>>) -> Self {
+    #[must_use]
+    pub fn new(out: Box<AstF<Self>>) -> Self {
         Self { out }
     }
 
@@ -281,7 +284,8 @@ impl fmt::Display for Ast {
     }
 }
 impl Ast {
-    #[must_use] pub fn size(&self) -> usize {
+    #[must_use]
+    pub fn size(&self) -> usize {
         match self {
             Self::Pair(p) => p.size(),
             _ => 0,
@@ -294,11 +298,13 @@ impl Ast {
             bad => Err(format!("cannot map {bad}")),
         }
     }
-    #[must_use] pub fn list(&self) -> bool {
+    #[must_use]
+    pub fn list(&self) -> bool {
         matches!(self,  Self::Pair(p) if p.list() ) || *self == Self::TheEmptyList
     }
 
-    #[must_use] pub fn datum_to_syntax(self) -> Self {
+    #[must_use]
+    pub fn datum_to_syntax(self) -> Self {
         match self {
             list if list.list() => list.map(|x| Ok(x.datum_to_syntax())).unwrap_or(list),
             Self::Syntax(_) => self,
@@ -340,6 +346,7 @@ enum Binding {
     LetSyntax,
     Quote,
     QuoteSyntax,
+    App,
     Variable(Symbol),
 }
 
@@ -354,6 +361,7 @@ impl fmt::Display for Binding {
                 Self::LetSyntax => "let-syntax".to_string(),
                 Self::Quote => "quote".to_string(),
                 Self::QuoteSyntax => "quote-syntax".to_string(),
+                Self::App => "%app".to_string(),
             }
         )
     }
@@ -366,6 +374,7 @@ impl From<Binding> for Symbol {
             Binding::LetSyntax => "let-syntax".into(),
             Binding::Quote => "quote".into(),
             Binding::QuoteSyntax => "quote-syntax".into(),
+            Binding::App => "%app".into(),
         }
     }
 }
@@ -463,7 +472,7 @@ impl Expander<Binding> {
             .filter(move |c_id| c_id.0 == id.0 && c_id.1.is_subset(&id.1))
     }
 
-    pub fn introduce<T: AdjustScope>(&self, s: T) -> T {
+    pub fn namespace_syntax_introduce<T: AdjustScope>(&self, s: T) -> T {
         s.add_scope(self.core_scope)
     }
 
@@ -481,7 +490,7 @@ impl Expander<Binding> {
         }
     }
 
-    fn expand_identifier(&self, s: Syntax, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
+    fn expand_identifier(&mut self, s: Syntax, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
         let binding = self.resolve(&s)?;
         if self.core_forms.contains(binding) {
             Err(format!("bad syntax dangling core form {}", s.0))
@@ -492,13 +501,10 @@ impl Expander<Binding> {
             let Binding::Variable(binding) = binding else {
                 panic!()
             };
-            let v = env
-                .lookup(binding)
-                .ok_or(format!("out of context {s:?}"))?;
-            if let CompileTimeBinding::Symbol(_) = v {
-                Ok(Ast::Syntax(s))
-            } else {
-                Err(format!("bad syntax non function call macro {}", s.0))
+            let v = env.lookup(binding).ok_or(format!("out of context {s:?}"))?;
+            match v {
+                CompileTimeBinding::Symbol(_) => Ok(Ast::Syntax(s)),
+                CompileTimeBinding::Macro(m) => self.apply_transformer(m, Ast::Syntax(s)), //_ => Err(format!("bad syntax non function call macro {}", s.0)),
             }
         }
     }
@@ -518,6 +524,14 @@ impl Expander<Binding> {
             Binding::Lambda => self.expand_lambda(s, env),
             Binding::LetSyntax => self.expand_let_syntax(s, env),
             Binding::Quote | Binding::QuoteSyntax => Ok(Ast::Pair(Box::new(s))),
+            Binding::App => {
+                if !s.list() {
+                    Err(format!("%app form's arguements must be a list"))?
+                }
+                // TODO: empty list
+                let Ast::Pair(p) = s.1 else { unreachable!() };
+                self.expand_app(*p, env)
+            }
             Binding::Variable(binding) => match env.lookup(binding) {
                 Some(CompileTimeBinding::Macro(m)) => {
                     //println!("{binding} in {env:?}");
@@ -538,7 +552,15 @@ impl Expander<Binding> {
         Ok(transformed_s.flip_scope(intro_scope))
     }
     fn expand_app(&mut self, s: Pair, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        s.map(|sub_s| self.expand(sub_s, env.clone()))
+        let Pair(rator, rands) = s;
+
+        Ok(Ast::Pair(Box::new(Pair(
+            Ast::Syntax(Syntax("%app".into(), BTreeSet::from([self.core_scope]))),
+            Ast::Pair(Box::new(Pair(
+                self.expand(rator, env.clone())?,
+                rands.map(|rand| self.expand(rand, env.clone()))?,
+            ))),
+        ))))
     }
 
     fn expand_lambda(&mut self, s: Pair, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
@@ -690,7 +712,19 @@ impl Expander<Binding> {
                             Ast::Pair(Box::new(Pair(datum, Ast::TheEmptyList))),
                         ))))
                     }
-                    _ => l.map(|e| self.compile(e)),
+                    Ok(Binding::App) => {
+                        let Pair(_, Ast::Pair(app)) = *l else {
+                            Err("bad syntax, %app requires at least a function")?
+                        };
+                        if app.1.list() {
+                            Err("bad syntax, %app arguments must be a list")?
+                        }
+                        Ok(Ast::Pair(Box::new(Pair(
+                            self.compile(app.0)?,
+                            app.1.map(|e| self.compile(e))?,
+                        ))))
+                    }
+                    _ => Err(format!("unrecognized core form {}", l.0)),
                 }
             }
             Ast::Syntax(s) => {
@@ -1316,7 +1350,7 @@ fn main() {
             .inspect(|e| println!("after reader: {e}"))
             .and_then(|ast| {
                 expander.expand(
-                    expander.introduce(ast.datum_to_syntax()),
+                    expander.namespace_syntax_introduce(ast.datum_to_syntax()),
                     CompileTimeEnvoirnment::new(),
                 )
             })
