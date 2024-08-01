@@ -405,6 +405,7 @@ impl Expander<Binding> {
             Binding::LetSyntax,
             Binding::Quote,
             Binding::QuoteSyntax,
+            Binding::App,
         ]);
         let core_primitives = BTreeSet::from([
             Binding::Variable("datum->syntax".into()),
@@ -478,15 +479,16 @@ impl Expander<Binding> {
 
     #[trace::trace()]
     pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        println!("expand {s}");
         match s {
+            Ast::Syntax(s) => self.expand_identifier(s, env),
             Ast::Pair(l) if matches!(&l.0, Ast::Syntax(_)) => {
                 self.expand_id_application_form(*l, env)
             }
-            Ast::Syntax(s) => self.expand_identifier(s, env),
-            Ast::Number(_) | Ast::Function(_) => Ok(s),
-            Ast::Symbol(_) | Ast::TheEmptyList => unreachable!(),
             Ast::Pair(l) => self.expand_app(*l, env),
+            _ => Ok(Ast::Pair(Box::new(Pair(
+                Ast::Syntax(Syntax("quote".into(), BTreeSet::from([self.core_scope]))),
+                Ast::Pair(Box::new(Pair(s, Ast::TheEmptyList))),
+            )))),
         }
     }
 
