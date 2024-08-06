@@ -293,10 +293,57 @@ impl Ast {
     }
     pub fn map(&self, f: impl FnMut(Self) -> Result<Self, String>) -> Result<Self, String> {
         match self {
-            Self::Pair(p) => p.map(f),
+            Self::Pair(p) => {
+                let this = &p;
+                let mut f = f;
+                let car = f(this.0.clone())?;
+                let cdr = this.1.map(f)?;
+                Ok(Ast::Pair(Box::new(Pair(car, cdr))))
+            }
             Self::TheEmptyList => Ok(Self::TheEmptyList),
             bad => Err(format!("cannot map {bad}")),
         }
+    }
+    pub fn map_pair<E>(self, mut f: impl FnMut(Self, bool) -> Result<Self, E>) -> Result<Self, E> {
+        {
+            match self {
+                Ast::Pair(p) => {
+                    let Pair(car, cdr) = *p;
+                    let car = f(car, false)?;
+                    let cdr = cdr.map_pair(f)?;
+                    Ok(Ast::Pair(Box::new(Pair(car, cdr))))
+                }
+                other_term => f(other_term, true),
+            }
+        }
+    }
+
+    pub fn foldl_pair<A>(self, mut f: impl FnMut(Self, bool, A) -> A, init: A) -> A {
+        match self {
+            Ast::Pair(p) => {
+                let Pair(car, cdr) = *p;
+                let car = f(car, false, init);
+                let cdr = cdr.foldl_pair(f, car);
+                cdr
+            }
+            other_term => f(other_term, true, init),
+        }
+    }
+
+    pub fn foldl<A>(self, mut f: impl FnMut(Self, A) -> A, init: A) -> Result<A, String> {
+        self.foldl_pair(
+            |term, base, init: Result<A, String>| {
+                if !base {
+                    init.map(|init| f(term, init))
+                } else {
+                    match term {
+                        Ast::TheEmptyList => init,
+                        _other => Err("".to_string()),
+                    }
+                }
+            },
+            Ok(init),
+        )
     }
     #[must_use]
     pub fn list(&self) -> bool {
@@ -410,6 +457,7 @@ impl Expander<Binding> {
         let core_primitives = BTreeSet::from([
             Binding::Variable("datum->syntax".into()),
             Binding::Variable("syntax->datum".into()),
+            Binding::Variable("syntax-e".into()),
             Binding::Variable("list".into()),
             Binding::Variable("cons".into()),
             Binding::Variable("car".into()),
@@ -570,24 +618,41 @@ impl Expander<Binding> {
         let Pair(ref lambda_id, Ast::Pair(ref inner)) = s else {
             Err(format!("invalid syntax {s:?} bad lambda"))?
         };
-        let Pair(Ast::Pair(ref arg), Ast::Pair(ref body)) = **inner else {
-            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
-        };
-        let Pair(Ast::Syntax(ref arg_id), Ast::TheEmptyList) = **arg else {
-            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
-        };
-        let Pair(ref body, Ast::TheEmptyList) = **body else {
+        let Pair(ref args, Ast::Pair(ref body)) = **inner else {
             Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
         };
         let sc = self.scope_creator.new_scope();
-        let id = arg_id.clone().add_scope(sc);
-        let binding = self.add_local_binding(id.clone());
-        let body_env = env.extend(binding.clone(), CompileTimeBinding::Symbol(binding));
+        let args = args.clone().map_pair(|term, base| match term {
+            Ast::Syntax(id) => {
+                let id = id.add_scope(sc);
+                Ok(Ast::Syntax(id))
+            }
+            Ast::TheEmptyList if base => Ok(Ast::TheEmptyList),
+            _ => Err(format!(
+                "{term} is not a symbol so it cannot be a parameter"
+            )),
+        })?;
+        let body_env = args.clone().foldl_pair(
+            |term, base, env: Result<CompileTimeEnvoirnment, String>| match term {
+                Ast::Syntax(id) => {
+                    let binding = self.add_local_binding(id);
+                    env.map(|env| env.extend(binding.clone(), CompileTimeBinding::Symbol(binding)))
+                }
+                Ast::TheEmptyList if base => env,
+                _ => Err(format!(
+                    "{term} is not a symbol so it cannot be a parameter"
+                )),
+            },
+            Ok(env),
+        )?;
+        let Pair(ref body, Ast::TheEmptyList) = **body else {
+            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
+        };
         let exp_body = self.expand(body.clone().add_scope(sc), body_env)?;
         Ok(Ast::Pair(Box::new(Pair(
             lambda_id.clone(),
             Ast::Pair(Box::new(Pair(
-                Ast::Pair(Box::new(Pair(Ast::Syntax(id), Ast::TheEmptyList))),
+                args,
                 Ast::Pair(Box::new(Pair(exp_body, Ast::TheEmptyList))),
             ))),
         ))))
@@ -662,27 +727,31 @@ impl Expander<Binding> {
                         let Pair(ref _lambda_id, Ast::Pair(ref inner)) = *l else {
                             Err(format!("invalid syntax {l:?} bad lambda"))?
                         };
-                        let Pair(Ast::Pair(ref arg), Ast::Pair(ref body)) = **inner else {
+                        let Pair(ref args, Ast::Pair(ref body)) = **inner else {
                             Err(format!("invalid syntax {inner:?}, bad form for lambda"))?
                         };
-                        let Pair(Ast::Syntax(ref id), Ast::TheEmptyList) = **arg else {
-                            Err(format!("invalid syntax {arg:?}, bad argument for lambda"))?
-                        };
+
+                        let args = args.clone().map_pair(|term, base| match term {
+                            Ast::Syntax(id) => {
+                                let Binding::Variable(id) = self.resolve(&id)? else {
+                                    Err("bad syntax cannot play with core form")?
+                                };
+                                Ok(Ast::Symbol(id.clone()))
+                            }
+                            Ast::TheEmptyList if base => Ok(Ast::TheEmptyList),
+                            _ => Err(format!(
+                                "{term} is not a symbol so it cannot be a parameter"
+                            )),
+                        })?;
                         let Pair(ref body, Ast::TheEmptyList) = **body else {
                             Err(format!("invalid syntax {body:?}, bad body for lambda"))?
-                        };
-                        let Binding::Variable(id) = self.resolve(id)? else {
-                            Err("bad syntax cannot play with core form")?
                         };
 
                         // (list 'lambda (list 'x) 'body)
                         Ok(Ast::Pair(Box::new(Pair(
                             Ast::Symbol(Symbol("lambda".into(), 0)),
                             Ast::Pair(Box::new(Pair(
-                                Ast::Pair(Box::new(Pair(
-                                    Ast::Symbol(id.clone()),
-                                    Ast::TheEmptyList,
-                                ))),
+                                args,
                                 Ast::Pair(Box::new(Pair(
                                     self.compile(body.clone())?,
                                     Ast::TheEmptyList,
@@ -718,7 +787,7 @@ impl Expander<Binding> {
                         let Pair(_, Ast::Pair(app)) = *l else {
                             Err("bad syntax, %app requires at least a function")?
                         };
-                        if app.1.list() {
+                        if !app.1.list() {
                             Err("bad syntax, %app arguments must be a list")?
                         }
                         Ok(Ast::Pair(Box::new(Pair(
@@ -986,17 +1055,15 @@ impl Evaluator {
                     let Pair(ref lambda_id, Ast::Pair(ref inner)) = *list else {
                         Err(format!("invalid syntax {list:?} bad lambda"))?
                     };
-                    let Pair(Ast::Pair(ref arg), Ast::Pair(ref body)) = **inner else {
+                    let Pair(ref arg, Ast::Pair(ref body)) = **inner else {
                         Err(format!("invalid syntax {list:?}, bad argument for lambda"))?
                     };
 
                     // TODO: variadic function with dot notation
-                    let args = arg.map(|arg| {
-                        if let Ast::Symbol(s) = arg {
-                            Ok(Ast::Symbol(s))
-                        } else {
-                            Err(format!("bad syntax {arg} is not a valid paramter"))
-                        }
+                    let args = arg.clone().map_pair(|arg, base| match arg {
+                        Ast::Symbol(s) => Ok(Ast::Symbol(s)),
+                        Ast::TheEmptyList if base => Ok(Ast::TheEmptyList),
+                        _ => Err(format!("bad syntax {arg} is not a valid paramter")),
                     })?;
                     Ok(Ast::Function(Function::Lambda(Lambda(
                         Box::new(Ast::Pair(body.clone())),
