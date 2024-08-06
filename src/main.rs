@@ -1,7 +1,6 @@
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![deny(static_mut_refs)]
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
-use core::panic;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::io::{BufRead, BufReader, Write};
@@ -10,7 +9,6 @@ use std::{cell::RefCell, cmp::Ordering};
 use std::{collections::BTreeSet, rc::Rc};
 
 use trace::trace;
-use Pair;
 
 // use trace::trace;
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -115,6 +113,28 @@ impl<'a> Clone for Box<dyn 'a + AnalyzeFn> {
     }
 }
 
+pub trait AnalyzeStateFn: Fn(EnvRef, State) -> Result<Ast, String> {
+    fn clone_box<'a>(&self) -> Box<dyn 'a + AnalyzeStateFn>
+    where
+        Self: 'a;
+}
+
+impl<F> AnalyzeStateFn for F
+where
+    F: Fn(EnvRef, State) -> Result<Ast, String> + Clone,
+{
+    fn clone_box<'a>(&self) -> Box<dyn 'a + AnalyzeStateFn>
+    where
+        Self: 'a,
+    {
+        Box::new(self.clone())
+    }
+}
+impl<'a> Clone for Box<dyn 'a + AnalyzeStateFn> {
+    fn clone(&self) -> Self {
+        (**self).clone_box()
+    }
+}
 #[derive(Clone, PartialEq, Debug)]
 pub enum Function {
     Lambda(Lambda),
@@ -124,7 +144,7 @@ pub enum Function {
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Lambda(l) => write!(f, "(lambda {} {}", l.2, l.0),
+            Self::Lambda(l) => write!(f, "(lambda {} <body>)", l.2),
             Self::Primitive(_) => write!(f, "(primitive-procedure)"),
         }
     }
@@ -134,8 +154,9 @@ impl Function {
     fn apply(&self, args: Ast) -> Result<Ast, String> {
         match self {
             Self::Lambda(Lambda(body, env, params)) => {
-                let env = Env::extend_envoirnment(env.clone(), *params.clone(), args)?;
-                Evaluator::eval_sequence(*body.clone(), env)
+                let env = Env::extend_envoirnment(env.clone(), params.clone(), args)?;
+                body(env)
+                //Evaluator::eval_sequence(*body.clone(), env)
             }
             Self::Primitive(p) => p(args),
         }
@@ -143,7 +164,7 @@ impl Function {
 }
 
 #[derive(Clone)]
-pub struct Lambda(Box<Ast>, EnvRef, Box<Ast>);
+pub struct Lambda(Box<dyn AnalyzeFn>, EnvRef, Ast);
 
 impl PartialEq for Lambda {
     fn eq(&self, _other: &Self) -> bool {
@@ -152,7 +173,7 @@ impl PartialEq for Lambda {
 }
 impl fmt::Debug for Lambda {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "(lambda {} {}", self.2, self.0)
+        write!(f, "(lambda {} <body>)", self.2)
     }
 }
 type Primitive = fn(Ast) -> Result<Ast, String>;
@@ -209,8 +230,19 @@ pub struct Ast {
 }
 impl Ast {
     #[must_use]
-    pub fn new(out: Box<AstF<Self>>) -> Self {
-        Self { out }
+    pub fn new(out: AstF<Self>) -> Self {
+        Self { out: Box::new(out) }
+    }
+    fn zygomorphism<A, B: Clone>(
+        self,
+        f: &mut impl FnMut(AstF<B>) -> B,
+        g: &mut impl FnMut(AstF<(B, A)>) -> A,
+    ) -> A {
+        self.catamorphism(&mut |term: AstF<(B, A)>| {
+            let ast_f = term.map_borrow(|(fst, _)| fst.clone());
+            (f(ast_f), g(term))
+        })
+        .1
     }
 
     fn catamorphism_borrow<A>(&self, algebra: &mut impl FnMut(&AstF<A>) -> A) -> A {
@@ -223,7 +255,7 @@ impl Ast {
         // TODO: report bug where inling x results in immutable borrow error
         //let x = self.out.map(|x| Self::bottom_up(x, f));
         //f(Fix::new(Box::new(x)))
-        self.catamorphism(&mut |x| f(Self::new(Box::new(x))))
+        self.catamorphism(&mut |x| f(Self::new(x)))
     }
     pub fn top_down(self, f: &mut impl FnMut(Self) -> Self) -> Self {
         //Fix::new(Box::new(f(self).out.map(|x| x.top_down(f))))
@@ -234,10 +266,15 @@ impl Ast {
         let mapped = self.out.map(|subterm| subterm.catamorphism(algebra));
         algebra(mapped)
     }
+    pub fn paramorphism<A>(self, algebra: &mut impl FnMut(Ast, AstF<A>) -> A) -> A {
+        let mapped = self
+            .out
+            .clone()
+            .map(|subterm| subterm.paramorphism(algebra));
+        algebra(self, mapped)
+    }
     pub fn anamorphism<A>(term: A, coalgebra: &mut impl FnMut(A) -> AstF<A>) -> Self {
-        Self::new(Box::new(
-            coalgebra(term).map(|subterm| Self::anamorphism(subterm, coalgebra)),
-        ))
+        Self::new(coalgebra(term).map(|subterm| Self::anamorphism(subterm, coalgebra)))
     }
     pub fn hylo<A, B>(
         term: A,
@@ -299,15 +336,15 @@ impl<A> AstF<A> {
 }
 impl fmt::Display for Ast {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AstF::Pair(Pair(pair)) => {
+        match &*self.out {
+            AstF::Pair(pair) => {
                 let mut string = pair.0.to_string();
                 let mut second = pair.1.clone();
-                while let AstF::Pair(Pair(pair)) = second {
+                while let AstF::Pair(pair) = *second.out {
                     string = format!("{string} {}", pair.0);
                     second = pair.1;
                 }
-                if second != AstF::TheEmptyList {
+                if *second.out != AstF::TheEmptyList {
                     string = format!("{string} . {second}");
                 }
                 write!(f, "({string})")
@@ -320,20 +357,47 @@ impl fmt::Display for Ast {
         }
     }
 }
+#[derive(Debug)]
+enum MapError<E> {
+    NoEmptyList,
+    BadListForm,
+    Other(E),
+}
 impl Ast {
     #[must_use]
-    pub fn size(&mut self) -> usize {
+    pub fn size(&self) -> usize {
         self.catamorphism_borrow(&mut |x: &AstF<usize>| match x {
             AstF::Pair(Pair(x, y)) => x.max(y) + 1,
             _ => 0,
         })
     }
-    pub fn map(&self, f: impl FnMut(Self) -> Result<Self, String>) -> Result<Self, String> {
-        match self {
-            AstF::Pair(Pair(p)) => p.map(f),
-            AstF::TheEmptyList => Ok(AstF::TheEmptyList),
-            bad => Err(format!("cannot map {bad}")),
+    // TODO: maybe map should not be in terms of catamorphism
+    pub fn map(&self, f: &impl Fn(Self) -> Result<Self, String>) -> Result<Self, String> {
+        macro_rules! base {
+            ($other:expr) => {
+                Box::new(move |pair| {
+                    if pair {
+                        f(Ast::new($other))
+                    } else {
+                        Err("not a list".to_string())
+                    }
+                })
+            };
         }
+        self.clone().catamorphism(
+            &mut |term: AstF<Box<dyn Fn(bool) -> Result<Ast, String>>>| match term {
+                AstF::Pair(Pair(car, cdr)) => Box::new(move |_| {
+                    let car = car(true)?;
+                    let cdr = cdr(false)?;
+                    Ok(Ast::new(AstF::Pair(Pair(car, cdr))))
+                }),
+                AstF::TheEmptyList => Box::new(|_| Ok(Ast::new(AstF::TheEmptyList))),
+                AstF::Syntax(syntax) => base!(AstF::Syntax(syntax.clone())),
+                AstF::Number(number) => base!(AstF::Number(number)),
+                AstF::Symbol(symbol) => base!(AstF::Symbol(symbol.clone())),
+                AstF::Function(function) => base!(AstF::Function(function.clone())),
+            },
+        )(false)
     }
     #[must_use]
     pub fn list(&self) -> bool {
@@ -346,19 +410,16 @@ impl Ast {
 
     #[must_use]
     pub fn datum_to_syntax(self) -> Self {
-        match self {
-            list if list.list() => list.map(|x| Ok(x.datum_to_syntax())).unwrap_or(list),
-            AstF::Syntax(_) => self,
-            AstF::Symbol(s) => AstF::Syntax(Syntax::new(s)),
-            _ => self,
-        }
+        self.catamorphism(&mut |term| match term {
+            AstF::Symbol(s) => Ast::new(AstF::Syntax(Syntax::new(s))),
+            _ => Ast::new(term),
+        })
     }
     fn syntax_to_datum(self) -> Self {
-        match self {
-            list if list.list() => list.map(|x| Ok(x.syntax_to_datum())).unwrap_or(list),
-            AstF::Syntax(Syntax(s, _)) => AstF::Symbol(s),
-            _ => self,
-        }
+        self.catamorphism(&mut |term| match term {
+            AstF::Syntax(Syntax(s, _)) => Ast::new(AstF::Symbol(s)),
+            _ => Ast::new(term),
+        })
     }
     fn identifier(&self) -> bool {
         matches!(*self.out, AstF::Syntax(..))
@@ -371,13 +432,10 @@ impl AdjustScope for Ast {
         other_scope: Scope,
         operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
     ) -> Self {
-        match self {
-            list if list.list() => list
-                .map(|x| Ok(x.adjust_scope(other_scope, operation)))
-                .unwrap_or(list),
-            AstF::Syntax(s) => AstF::Syntax(s.adjust_scope(other_scope, operation)),
-            _ => self,
-        }
+        self.catamorphism(&mut |term| match term {
+            AstF::Syntax(x) => Ast::new(AstF::Syntax(x.adjust_scope(other_scope, operation))),
+            _ => Ast::new(term),
+        })
     }
 }
 
@@ -430,513 +488,519 @@ pub struct Expander<T> {
     env: EnvRef,
 }
 
-impl Default for Expander<Binding> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+//impl Default for Expander<Binding> {
+//    fn default() -> Self {
+//        Self::new()
+//    }
+//}
 
-impl Expander<Binding> {
-    #[must_use]
-    pub fn new() -> Self {
-        let mut scope_creator = UniqueNumberManager::new();
-        let core_scope = scope_creator.new_scope();
-        let core_forms = BTreeSet::from([
-            Binding::Lambda,
-            Binding::LetSyntax,
-            Binding::Quote,
-            Binding::QuoteSyntax,
-            Binding::App,
-        ]);
-        let core_primitives = BTreeSet::from([
-            Binding::Variable("datum->syntax".into()),
-            Binding::Variable("syntax->datum".into()),
-            Binding::Variable("list".into()),
-            Binding::Variable("cons".into()),
-            Binding::Variable("car".into()),
-            Binding::Variable("cdr".into()),
-            Binding::Variable("map".into()),
-        ]);
-        let mut this = Self {
-            scope_creator,
-            core_scope,
-            core_primitives,
-            core_forms,
-            all_bindings: HashMap::new(),
-            env: new_env(),
-        };
-        this.core_forms
-            .clone()
-            .union(&this.core_primitives.clone())
-            .for_each(|core| {
-                this.add_binding(
-                    Syntax(core.clone().into(), BTreeSet::from([this.core_scope])),
-                    core.clone(),
-                );
-            });
-        this
-    }
-    fn add_binding(&mut self, id: Syntax, binding: Binding) {
-        self.all_bindings.insert(id, binding);
-    }
-
-    fn add_local_binding(&mut self, id: Syntax) -> Symbol {
-        let symbol = self.scope_creator.gen_sym(&id.0 .0);
-        self.add_binding(id, Binding::Variable(symbol.clone()));
-        symbol
-    }
-
-    fn resolve(&self, id: &Syntax) -> Result<&Binding, String> {
-        let candidate_ids = self.find_all_matching_bindings(id);
-        let id = candidate_ids
-            .clone()
-            .max_by_key(|id| id.1.len())
-            .ok_or(format!("free variable {id:?}"))?;
-        if check_unambiguous(id, candidate_ids) {
-            self.all_bindings
-                .get(id)
-                .ok_or(format!("free variable {}", id.0 .0))
-        } else {
-            Err(format!("ambiguous binding {}", id.0 .0))
-        }
-    }
-
-    fn free_identifier(&self, a: Ast, b: Ast) -> bool {
-        matches!((*a.out, *b.out), (AstF::Syntax(a), AstF::Syntax(b)) if self.resolve( &a).is_ok_and(|a| self.resolve(&b).is_ok_and(|b| a == b )))
-    }
-
-    fn find_all_matching_bindings<'a>(
-        &'a self,
-        id: &'a Syntax,
-    ) -> impl Iterator<Item = &Syntax> + Clone + 'a {
-        self.all_bindings
-            .keys()
-            .filter(move |c_id| c_id.0 == id.0 && c_id.1.is_subset(&id.1))
-    }
-
-    pub fn namespace_syntax_introduce<T: AdjustScope>(&self, s: T) -> T {
-        s.add_scope(self.core_scope)
-    }
-
-    #[trace::trace()]
-    pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        match s {
-            AstF::Syntax(s) => self.expand_identifier(s, env),
-            AstF::Pair(l) if matches!(&l.0, AstF::Syntax(_)) => {
-                self.expand_id_application_form(*l, env)
-            }
-            AstF::Pair(l) => self.expand_app(*l, env),
-            _ => Ok(AstF::Pair(Box::new(Pair(
-                AstF::Syntax(Syntax("quote".into(), BTreeSet::from([self.core_scope]))),
-                AstF::Pair(Box::new(Pair(s, AstF::TheEmptyList))),
-            )))),
-        }
-    }
-
-    fn expand_identifier(&mut self, s: Syntax, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        let binding = self.resolve(&s)?;
-        if self.core_forms.contains(binding) {
-            Err(format!("bad syntax dangling core form {}", s.0))
-        } else if self.core_primitives.contains(binding) {
-            Ok(AstF::Syntax(s))
-        } else {
-            //println!("{:?}", env);
-            let Binding::Variable(binding) = binding else {
-                panic!()
-            };
-            let v = env.lookup(binding).ok_or(format!("out of context {s:?}"))?;
-            match v {
-                CompileTimeBinding::Symbol(_) => Ok(AstF::Syntax(s)),
-                CompileTimeBinding::Macro(m) => self.apply_transformer(m, AstF::Syntax(s)), //_ => Err(format!("bad syntax non function call macro {}", s.0)),
-            }
-        }
-    }
-
-    // constraints = s.len() > 0
-    // constraints = s[0] == AstF::Syntax(_)
-    fn expand_id_application_form(
-        &mut self,
-        s: Pair,
-        env: CompileTimeEnvoirnment,
-    ) -> Result<Ast, String> {
-        let AstF::Syntax(ref id) = s.0 else {
-            unreachable!()
-        };
-        let binding = self.resolve(id)?;
-        match binding {
-            Binding::Lambda => self.expand_lambda(s, env),
-            Binding::LetSyntax => self.expand_let_syntax(s, env),
-            Binding::Quote | Binding::QuoteSyntax => Ok(AstF::Pair(Pair(Box::new(s)))),
-            Binding::App => {
-                if !s.list() {
-                    Err(format!("%app form's arguements must be a list"))?
-                }
-                // TODO: empty list
-                let AstF::Pair(Pair(p)) = s.1 else { unreachable!() };
-                self.expand_app(*p, env)
-            }
-            Binding::Variable(binding) => match env.lookup(binding) {
-                Some(CompileTimeBinding::Macro(m)) => {
-                    //println!("{binding} in {env:?}");
-                    let apply_transformer = self.apply_transformer(m, AstF::Pair(Pair(Box::new(s))))?;
-                    //println!("app {apply_transformer}");
-                    self.expand(apply_transformer, env)
-                }
-                _ => self.expand_app(s, env),
-            },
-        }
-    }
-    fn apply_transformer(&mut self, m: Function, s: Ast) -> Result<Ast, String> {
-        let intro_scope = self.scope_creator.new_scope();
-        //println!("apply_transformer {s:?}");
-        let intro_s = s.add_scope(intro_scope);
-        let transformed_s = m.apply(AstF::Pair(Pair(Box::new(Pair(intro_s, AstF::TheEmptyList)))))?;
-
-        Ok(transformed_s.flip_scope(intro_scope))
-    }
-    fn expand_app(&mut self, s: Pair, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        let Pair(rator, rands) = s;
-
-        Ok(AstF::Pair(Pair(Box::new(Pair(
-            AstF::Syntax(Syntax("%app".into(), BTreeSet::from([self.core_scope]))),
-            AstF::Pair(Pair(Box::new(Pair(
-                self.expand(rator, env.clone())?,
-                rands.map(|rand| self.expand(rand, env.clone()))?,
-            )))),
-        )))))
-    }
-
-    fn expand_lambda(&mut self, s: Pair, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        //println!("lambda body {s:?}");
-        let Pair(ref lambda_id, AstF::Pair(Pair(ref inner))) = s else {
-            Err(format!("invalid syntax {s:?} bad lambda"))?
-        };
-        let Pair(AstF::Pair(Pair(ref arg)), AstF::Pair(Pair(ref body))) = **inner else {
-            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
-        };
-        let Pair(AstF::Syntax(ref arg_id), AstF::TheEmptyList) = **arg else {
-            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
-        };
-        let Pair(ref body, AstF::TheEmptyList) = **body else {
-            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
-        };
-        let sc = self.scope_creator.new_scope();
-        let id = arg_id.clone().add_scope(sc);
-        let binding = self.add_local_binding(id.clone());
-        let body_env = env.extend(binding.clone(), CompileTimeBinding::Symbol(binding));
-        let exp_body = self.expand(body.clone().add_scope(sc), body_env)?;
-        Ok(AstF::Pair(Pair(Box::new(Pair(
-            lambda_id.clone(),
-            AstF::Pair(Pair(Box::new(Pair(
-                AstF::Pair(Pair(Box::new(Pair(AstF::Syntax(id), AstF::TheEmptyList)))),
-                AstF::Pair(Pair(Box::new(Pair(exp_body, AstF::TheEmptyList)))),
-            )))),
-        )))))
-    }
-
-    fn expand_let_syntax(&mut self, s: Pair, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        // `(,let-syntax-id ([,lhs-id ,rhs])
-        //            ,body)
-        // (cons 'let-syntax (cons (cons (cons 'lhs (cons 'rhs '())) '()) (cons 'body '())))
-        let Pair(ref _let_syntax_id, AstF::Pair(Pair(ref inner))) = s else {
-            Err(format!("invalid syntax {s:?} bad let-syntax"))?
-        };
-        let Pair(AstF::Pair(Pair(ref binder_list)), AstF::Pair(Pair(ref body))) = **inner else {
-            Err(format!("invalid syntax {s:?} bad let-syntax {:?}", inner.0))?
-        };
-        let Pair(AstF::Pair(Pair(ref binder_list)), AstF::TheEmptyList) = **binder_list else {
-            Err(format!(
-                "invalid syntax {s:?}, bad binder list for let-syntax {binder_list:?}"
-            ))?
-        };
-        let Pair(AstF::Syntax(ref lhs_id), AstF::Pair(Pair(ref rhs_list))) = **binder_list else {
-            Err(format!(
-                "invalid syntax {s:?}, bad binder for let-syntax {binder_list:?}"
-            ))?
-        };
-        let Pair(ref rhs, AstF::TheEmptyList) = **rhs_list else {
-            Err(format!(
-                "invalid syntax {s:?}, bad binder list for let-syntax {rhs_list:?}"
-            ))?
-        };
-        let Pair(ref body, AstF::TheEmptyList) = **body else {
-            Err(format!(
-                "invalid syntax {s:?}, bad binder list for let-syntax {body:?}"
-            ))?
-        };
-        let sc = self.scope_creator.new_scope();
-        let id = lhs_id.clone().add_scope(sc);
-        let binding = self.add_local_binding(id);
-        let rhs_val = self.eval_for_syntax_binding(rhs.clone())?;
-        let body_env = env.extend(binding, rhs_val);
-        //println!("found macro {binding}");
-        //println!("expand {body} in {body_env:?}");
-        self.expand(body.clone().add_scope(sc), body_env)
-    }
-
-    fn eval_for_syntax_binding(&mut self, rhs: Ast) -> Result<CompileTimeBinding, String> {
-        // let var_name = format!("problem `evaluating` macro {rhs}");
-        //println!("macro body {rhs}");
-        let expand = self.expand(rhs, CompileTimeEnvoirnment::new())?;
-        //println!("macro body {expand}");
-        self.eval_compiled(self.compile(expand)?).and_then(|e| {
-            if let AstF::Function(f) = e {
-                Ok(CompileTimeBinding::Macro(f))
-            } else {
-                Err(format!("{e} is not a macro"))
-            }
-        })
-    }
-
-    #[trace::trace()]
-    fn compile(&self, rhs: Ast) -> Result<Ast, String> {
-        println!("compile {rhs}");
-        match rhs {
-            AstF::Pair(l) => {
-                let core_sym = if let AstF::Syntax(ref s) = l.0 {
-                    self.resolve(s)
-                } else {
-                    Err("just for _ case in next match does not actually error".to_string())
-                };
-                match core_sym {
-                    Ok(Binding::Lambda) => {
-                        let Pair(ref _lambda_id, AstF::Pair(ref inner)) = *l else {
-                            Err(format!("invalid syntax {l:?} bad lambda"))?
-                        };
-                        let Pair(AstF::Pair(ref arg), AstF::Pair(ref body)) = **inner else {
-                            Err(format!("invalid syntax {inner:?}, bad form for lambda"))?
-                        };
-                        let Pair(AstF::Syntax(ref id), AstF::TheEmptyList) = **arg else {
-                            Err(format!("invalid syntax {arg:?}, bad argument for lambda"))?
-                        };
-                        let Pair(ref body, AstF::TheEmptyList) = **body else {
-                            Err(format!("invalid syntax {body:?}, bad body for lambda"))?
-                        };
-                        let Binding::Variable(id) = self.resolve(id)? else {
-                            Err("bad syntax cannot play with core form")?
-                        };
-
-                        // (list 'lambda (list 'x) 'body)
-                        Ok(AstF::Pair(Box::new(Pair(
-                            AstF::Symbol(Symbol("lambda".into(), 0)),
-                            AstF::Pair(Box::new(Pair(
-                                AstF::Pair(Box::new(Pair(
-                                    AstF::Symbol(id.clone()),
-                                    AstF::TheEmptyList,
-                                ))),
-                                AstF::Pair(Box::new(Pair(
-                                    self.compile(body.clone())?,
-                                    AstF::TheEmptyList,
-                                ))),
-                            ))),
-                        ))))
-                    }
-                    Ok(Binding::Quote) => {
-                        let Pair(_, AstF::Pair(datum)) = *l else {
-                            Err("bad syntax, quote requires one expression")?
-                        };
-                        let Pair(datum, AstF::TheEmptyList) = *datum else {
-                            Err("bad syntax, quote requires one expression")?
-                        };
-                        Ok(AstF::Pair(Box::new(Pair(
-                            AstF::Symbol(Symbol("quote".into(), 0)),
-                            AstF::Pair(Box::new(Pair(datum.syntax_to_datum(), AstF::TheEmptyList))),
-                        ))))
-                    }
-                    Ok(Binding::QuoteSyntax) => {
-                        let Pair(_, AstF::Pair(datum)) = *l else {
-                            Err("bad syntax, quote-syntax requires one expression")?
-                        };
-                        let Pair(datum, AstF::TheEmptyList) = *datum else {
-                            Err("bad syntax, quote-syntax requires one expression")?
-                        };
-                        Ok(AstF::Pair(Box::new(Pair(
-                            AstF::Symbol(Symbol("quote".into(), 0)),
-                            AstF::Pair(Box::new(Pair(datum, AstF::TheEmptyList))),
-                        ))))
-                    }
-                    Ok(Binding::App) => {
-                        let Pair(_, AstF::Pair(app)) = *l else {
-                            Err("bad syntax, %app requires at least a function")?
-                        };
-                        if app.1.list() {
-                            Err("bad syntax, %app arguments must be a list")?
-                        }
-                        Ok(AstF::Pair(Box::new(Pair(
-                            self.compile(app.0)?,
-                            app.1.map(|e| self.compile(e))?,
-                        ))))
-                    }
-                    _ => Err(format!("unrecognized core form {}", l.0)),
-                }
-            }
-            AstF::Syntax(s) => {
-                if let Binding::Variable(s) = self.resolve(&s)? {
-                    Ok(AstF::Symbol(s.clone()))
-                } else {
-                    Err("bad syntax cannot play with core form")?
-                }
-            }
-            AstF::Number(_) | AstF::Function(_) => Ok(rhs),
-            AstF::Symbol(_) | AstF::TheEmptyList => unreachable!(),
-        }
-    }
-
-    fn eval_compiled(&self, new: Ast) -> Result<Ast, String> {
-        //println!("body {new}");
-        Evaluator::eval(new, self.env.clone())
-    }
-}
+//impl Expander<Binding> {
+//    #[must_use]
+//    pub fn new() -> Self {
+//        let mut scope_creator = UniqueNumberManager::new();
+//        let core_scope = scope_creator.new_scope();
+//        let core_forms = BTreeSet::from([
+//            Binding::Lambda,
+//            Binding::LetSyntax,
+//            Binding::Quote,
+//            Binding::QuoteSyntax,
+//            Binding::App,
+//        ]);
+//        let core_primitives = BTreeSet::from([
+//            Binding::Variable("datum->syntax".into()),
+//            Binding::Variable("syntax->datum".into()),
+//            Binding::Variable("list".into()),
+//            Binding::Variable("cons".into()),
+//            Binding::Variable("car".into()),
+//            Binding::Variable("cdr".into()),
+//            Binding::Variable("map".into()),
+//        ]);
+//        let mut this = Self {
+//            scope_creator,
+//            core_scope,
+//            core_primitives,
+//            core_forms,
+//            all_bindings: HashMap::new(),
+//            env: new_env(),
+//        };
+//        this.core_forms
+//            .clone()
+//            .union(&this.core_primitives.clone())
+//            .for_each(|core| {
+//                this.add_binding(
+//                    Syntax(core.clone().into(), BTreeSet::from([this.core_scope])),
+//                    core.clone(),
+//                );
+//            });
+//        this
+//    }
+//    fn add_binding(&mut self, id: Syntax, binding: Binding) {
+//        self.all_bindings.insert(id, binding);
+//    }
+//
+//    fn add_local_binding(&mut self, id: Syntax) -> Symbol {
+//        let symbol = self.scope_creator.gen_sym(&id.0 .0);
+//        self.add_binding(id, Binding::Variable(symbol.clone()));
+//        symbol
+//    }
+//
+//    fn resolve(&self, id: &Syntax) -> Result<&Binding, String> {
+//        let candidate_ids = self.find_all_matching_bindings(id);
+//        let id = candidate_ids
+//            .clone()
+//            .max_by_key(|id| id.1.len())
+//            .ok_or(format!("free variable {id:?}"))?;
+//        if check_unambiguous(id, candidate_ids) {
+//            self.all_bindings
+//                .get(id)
+//                .ok_or(format!("free variable {}", id.0 .0))
+//        } else {
+//            Err(format!("ambiguous binding {}", id.0 .0))
+//        }
+//    }
+//
+//    fn free_identifier(&self, a: Ast, b: Ast) -> bool {
+//        matches!((*a.out, *b.out), (AstF::Syntax(a), AstF::Syntax(b)) if self.resolve( &a).is_ok_and(|a| self.resolve(&b).is_ok_and(|b| a == b )))
+//    }
+//
+//    fn find_all_matching_bindings<'a>(
+//        &'a self,
+//        id: &'a Syntax,
+//    ) -> impl Iterator<Item = &Syntax> + Clone + 'a {
+//        self.all_bindings
+//            .keys()
+//            .filter(move |c_id| c_id.0 == id.0 && c_id.1.is_subset(&id.1))
+//    }
+//
+//    pub fn namespace_syntax_introduce<T: AdjustScope>(&self, s: T) -> T {
+//        s.add_scope(self.core_scope)
+//    }
+//
+//    #[trace::trace()]
+//    pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
+//        match *s.out {
+//            AstF::Syntax(s) => self.expand_identifier(s, env),
+//            AstF::Pair(l) if matches!(&*l.0.out, AstF::Syntax(_)) => {
+//                self.expand_id_application_form(l, env)
+//            }
+//            AstF::Pair(l) => self.expand_app(l, env),
+//            _ => Ok(Ast::new(AstF::Pair(Pair(
+//                Ast::new(AstF::Syntax(Syntax(
+//                    "quote".into(),
+//                    BTreeSet::from([self.core_scope]),
+//                ))),
+//                Ast::new(AstF::Pair((Pair(s, Ast::new(AstF::TheEmptyList))))),
+//            )))),
+//        }
+//    }
+//
+//    fn expand_identifier(&mut self, s: Syntax, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
+//        let binding = self.resolve(&s)?;
+//        if self.core_forms.contains(binding) {
+//            Err(format!("bad syntax dangling core form {}", s.0))
+//        } else if self.core_primitives.contains(binding) {
+//            Ok(AstF::Syntax(s))
+//        } else {
+//            //println!("{:?}", env);
+//            let Binding::Variable(binding) = binding else {
+//                panic!()
+//            };
+//            let v = env.lookup(binding).ok_or(format!("out of context {s:?}"))?;
+//            match v {
+//                CompileTimeBinding::Symbol(_) => Ok(AstF::Syntax(s)),
+//                CompileTimeBinding::Macro(m) => self.apply_transformer(m, AstF::Syntax(s)), //_ => Err(format!("bad syntax non function call macro {}", s.0)),
+//            }
+//        }
+//    }
+//
+//    // constraints = s.len() > 0
+//    // constraints = s[0] == AstF::Syntax(_)
+//    fn expand_id_application_form(
+//        &mut self,
+//        s: Pair,
+//        env: CompileTimeEnvoirnment,
+//    ) -> Result<Ast, String> {
+//        let AstF::Syntax(ref id) = s.0 else {
+//            unreachable!()
+//        };
+//        let binding = self.resolve(id)?;
+//        match binding {
+//            Binding::Lambda => self.expand_lambda(s, env),
+//            Binding::LetSyntax => self.expand_let_syntax(s, env),
+//            Binding::Quote | Binding::QuoteSyntax => Ok(AstF::Pair(Pair(Box::new(s)))),
+//            Binding::App => {
+//                if !s.list() {
+//                    Err(format!("%app form's arguements must be a list"))?
+//                }
+//                // TODO: empty list
+//                let AstF::Pair(Pair(p)) = s.1 else {
+//                    unreachable!()
+//                };
+//                self.expand_app(*p, env)
+//            }
+//            Binding::Variable(binding) => match env.lookup(binding) {
+//                Some(CompileTimeBinding::Macro(m)) => {
+//                    //println!("{binding} in {env:?}");
+//                    let apply_transformer =
+//                        self.apply_transformer(m, AstF::Pair(Pair(Box::new(s))))?;
+//                    //println!("app {apply_transformer}");
+//                    self.expand(apply_transformer, env)
+//                }
+//                _ => self.expand_app(s, env),
+//            },
+//        }
+//    }
+//    fn apply_transformer(&mut self, m: Function, s: Ast) -> Result<Ast, String> {
+//        let intro_scope = self.scope_creator.new_scope();
+//        //println!("apply_transformer {s:?}");
+//        let intro_s = s.add_scope(intro_scope);
+//        let transformed_s = m.apply(AstF::Pair(Pair(Box::new(Pair(
+//            intro_s,
+//            AstF::TheEmptyList,
+//        )))))?;
+//
+//        Ok(transformed_s.flip_scope(intro_scope))
+//    }
+//    fn expand_app(&mut self, s: Pair, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
+//        let Pair(rator, rands) = s;
+//
+//        Ok(AstF::Pair(Pair(Box::new(Pair(
+//            AstF::Syntax(Syntax("%app".into(), BTreeSet::from([self.core_scope]))),
+//            AstF::Pair(Pair(Box::new(Pair(
+//                self.expand(rator, env.clone())?,
+//                rands.map(|rand| self.expand(rand, env.clone()))?,
+//            )))),
+//        )))))
+//    }
+//
+//    fn expand_lambda(&mut self, s: Pair, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
+//        //println!("lambda body {s:?}");
+//        let Pair(ref lambda_id, AstF::Pair(Pair(ref inner))) = s else {
+//            Err(format!("invalid syntax {s:?} bad lambda"))?
+//        };
+//        let Pair(AstF::Pair(Pair(ref arg)), AstF::Pair(Pair(ref body))) = **inner else {
+//            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
+//        };
+//        let Pair(AstF::Syntax(ref arg_id), AstF::TheEmptyList) = **arg else {
+//            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
+//        };
+//        let Pair(ref body, AstF::TheEmptyList) = **body else {
+//            Err(format!("invalid syntax {s:?}, bad argument for lambda"))?
+//        };
+//        let sc = self.scope_creator.new_scope();
+//        let id = arg_id.clone().add_scope(sc);
+//        let binding = self.add_local_binding(id.clone());
+//        let body_env = env.extend(binding.clone(), CompileTimeBinding::Symbol(binding));
+//        let exp_body = self.expand(body.clone().add_scope(sc), body_env)?;
+//        Ok(AstF::Pair(Pair(Box::new(Pair(
+//            lambda_id.clone(),
+//            AstF::Pair(Pair(Box::new(Pair(
+//                AstF::Pair(Pair(Box::new(Pair(AstF::Syntax(id), AstF::TheEmptyList)))),
+//                AstF::Pair(Pair(Box::new(Pair(exp_body, AstF::TheEmptyList)))),
+//            )))),
+//        )))))
+//    }
+//
+//    fn expand_let_syntax(&mut self, s: Pair, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
+//        // `(,let-syntax-id ([,lhs-id ,rhs])
+//        //            ,body)
+//        // (cons 'let-syntax (cons (cons (cons 'lhs (cons 'rhs '())) '()) (cons 'body '())))
+//        let Pair(ref _let_syntax_id, AstF::Pair(Pair(ref inner))) = s else {
+//            Err(format!("invalid syntax {s:?} bad let-syntax"))?
+//        };
+//        let Pair(AstF::Pair(Pair(ref binder_list)), AstF::Pair(Pair(ref body))) = **inner else {
+//            Err(format!("invalid syntax {s:?} bad let-syntax {:?}", inner.0))?
+//        };
+//        let Pair(AstF::Pair(Pair(ref binder_list)), AstF::TheEmptyList) = **binder_list else {
+//            Err(format!(
+//                "invalid syntax {s:?}, bad binder list for let-syntax {binder_list:?}"
+//            ))?
+//        };
+//        let Pair(AstF::Syntax(ref lhs_id), AstF::Pair(Pair(ref rhs_list))) = **binder_list else {
+//            Err(format!(
+//                "invalid syntax {s:?}, bad binder for let-syntax {binder_list:?}"
+//            ))?
+//        };
+//        let Pair(ref rhs, AstF::TheEmptyList) = **rhs_list else {
+//            Err(format!(
+//                "invalid syntax {s:?}, bad binder list for let-syntax {rhs_list:?}"
+//            ))?
+//        };
+//        let Pair(ref body, AstF::TheEmptyList) = **body else {
+//            Err(format!(
+//                "invalid syntax {s:?}, bad binder list for let-syntax {body:?}"
+//            ))?
+//        };
+//        let sc = self.scope_creator.new_scope();
+//        let id = lhs_id.clone().add_scope(sc);
+//        let binding = self.add_local_binding(id);
+//        let rhs_val = self.eval_for_syntax_binding(rhs.clone())?;
+//        let body_env = env.extend(binding, rhs_val);
+//        //println!("found macro {binding}");
+//        //println!("expand {body} in {body_env:?}");
+//        self.expand(body.clone().add_scope(sc), body_env)
+//    }
+//
+//    fn eval_for_syntax_binding(&mut self, rhs: Ast) -> Result<CompileTimeBinding, String> {
+//        // let var_name = format!("problem `evaluating` macro {rhs}");
+//        //println!("macro body {rhs}");
+//        let expand = self.expand(rhs, CompileTimeEnvoirnment::new())?;
+//        //println!("macro body {expand}");
+//        self.eval_compiled(self.compile(expand)?).and_then(|e| {
+//            if let AstF::Function(f) = e {
+//                Ok(CompileTimeBinding::Macro(f))
+//            } else {
+//                Err(format!("{e} is not a macro"))
+//            }
+//        })
+//    }
+//
+//    #[trace::trace()]
+//    fn compile(&self, rhs: Ast) -> Result<Ast, String> {
+//        println!("compile {rhs}");
+//        match rhs {
+//            AstF::Pair(l) => {
+//                let core_sym = if let AstF::Syntax(ref s) = l.0 {
+//                    self.resolve(s)
+//                } else {
+//                    Err("just for _ case in next match does not actually error".to_string())
+//                };
+//                match core_sym {
+//                    Ok(Binding::Lambda) => {
+//                        let Pair(ref _lambda_id, AstF::Pair(ref inner)) = *l else {
+//                            Err(format!("invalid syntax {l:?} bad lambda"))?
+//                        };
+//                        let Pair(AstF::Pair(ref arg), AstF::Pair(ref body)) = **inner else {
+//                            Err(format!("invalid syntax {inner:?}, bad form for lambda"))?
+//                        };
+//                        let Pair(AstF::Syntax(ref id), AstF::TheEmptyList) = **arg else {
+//                            Err(format!("invalid syntax {arg:?}, bad argument for lambda"))?
+//                        };
+//                        let Pair(ref body, AstF::TheEmptyList) = **body else {
+//                            Err(format!("invalid syntax {body:?}, bad body for lambda"))?
+//                        };
+//                        let Binding::Variable(id) = self.resolve(id)? else {
+//                            Err("bad syntax cannot play with core form")?
+//                        };
+//
+//                        // (list 'lambda (list 'x) 'body)
+//                        Ok(AstF::Pair(Box::new(Pair(
+//                            AstF::Symbol(Symbol("lambda".into(), 0)),
+//                            AstF::Pair(Box::new(Pair(
+//                                AstF::Pair(Box::new(Pair(
+//                                    AstF::Symbol(id.clone()),
+//                                    AstF::TheEmptyList,
+//                                ))),
+//                                AstF::Pair(Box::new(Pair(
+//                                    self.compile(body.clone())?,
+//                                    AstF::TheEmptyList,
+//                                ))),
+//                            ))),
+//                        ))))
+//                    }
+//                    Ok(Binding::Quote) => {
+//                        let Pair(_, AstF::Pair(datum)) = *l else {
+//                            Err("bad syntax, quote requires one expression")?
+//                        };
+//                        let Pair(datum, AstF::TheEmptyList) = *datum else {
+//                            Err("bad syntax, quote requires one expression")?
+//                        };
+//                        Ok(AstF::Pair(Box::new(Pair(
+//                            AstF::Symbol(Symbol("quote".into(), 0)),
+//                            AstF::Pair(Box::new(Pair(datum.syntax_to_datum(), AstF::TheEmptyList))),
+//                        ))))
+//                    }
+//                    Ok(Binding::QuoteSyntax) => {
+//                        let Pair(_, AstF::Pair(datum)) = *l else {
+//                            Err("bad syntax, quote-syntax requires one expression")?
+//                        };
+//                        let Pair(datum, AstF::TheEmptyList) = *datum else {
+//                            Err("bad syntax, quote-syntax requires one expression")?
+//                        };
+//                        Ok(AstF::Pair(Box::new(Pair(
+//                            AstF::Symbol(Symbol("quote".into(), 0)),
+//                            AstF::Pair(Box::new(Pair(datum, AstF::TheEmptyList))),
+//                        ))))
+//                    }
+//                    Ok(Binding::App) => {
+//                        let Pair(_, AstF::Pair(app)) = *l else {
+//                            Err("bad syntax, %app requires at least a function")?
+//                        };
+//                        if app.1.list() {
+//                            Err("bad syntax, %app arguments must be a list")?
+//                        }
+//                        Ok(AstF::Pair(Box::new(Pair(
+//                            self.compile(app.0)?,
+//                            app.1.map(|e| self.compile(e))?,
+//                        ))))
+//                    }
+//                    _ => Err(format!("unrecognized core form {}", l.0)),
+//                }
+//            }
+//            AstF::Syntax(s) => {
+//                if let Binding::Variable(s) = self.resolve(&s)? {
+//                    Ok(AstF::Symbol(s.clone()))
+//                } else {
+//                    Err("bad syntax cannot play with core form")?
+//                }
+//            }
+//            AstF::Number(_) | AstF::Function(_) => Ok(rhs),
+//            AstF::Symbol(_) | AstF::TheEmptyList => unreachable!(),
+//        }
+//    }
+//
+//    fn eval_compiled(&self, new: Ast) -> Result<Ast, String> {
+//        //println!("body {new}");
+//        Evaluator::eval(new, self.env.clone())
+//    }
+//}
 
 fn new_env() -> Rc<RefCell<Env>> {
     let env = Env::new();
-    env.borrow_mut().define(
-        Symbol("datum->syntax".into(), 0),
-        AstF::Function(Function::Primitive(move |e| {
-            let AstF::Pair(Pair(e)) = e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-            let Pair(e, AstF::TheEmptyList) = *e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-            Ok(e.datum_to_syntax())
-        })),
-    );
-    env.borrow_mut().define(
-        Symbol("syntax->datum".into(), 0),
-        AstF::Function(Function::Primitive(move |e| {
-            let AstF::Pair(Pair(e)) = e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-            let Pair(e, AstF::TheEmptyList) = *e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-            Ok(e.syntax_to_datum())
-        })),
-    );
-    env.borrow_mut().define(
-        Symbol("syntax-e".into(), 0),
-        AstF::Function(Function::Primitive(move |e| {
-            let AstF::Pair(Pair(e)) = e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-            let Pair(AstF::Syntax(Syntax(e, _)), AstF::TheEmptyList) = *e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-            Ok(AstF::Symbol(e))
-        })),
-    );
+    //env.borrow_mut().define(
+    //    Symbol("datum->syntax".into(), 0),
+    //    AstF::Function(Function::Primitive(move |e| {
+    //        let AstF::Pair(Pair(e)) = e else {
+    //            Err(format!(
+    //                "arity error: expected 1 argument, got {}",
+    //                e.size()
+    //            ))?
+    //        };
+    //        let Pair(e, AstF::TheEmptyList) = *e else {
+    //            Err(format!(
+    //                "arity error: expected 1 argument, got {}",
+    //                e.size()
+    //            ))?
+    //        };
+    //        Ok(e.datum_to_syntax())
+    //    })),
+    //);
+    //env.borrow_mut().define(
+    //    Symbol("syntax->datum".into(), 0),
+    //    AstF::Function(Function::Primitive(move |e| {
+    //        let AstF::Pair(Pair(e)) = e else {
+    //            Err(format!(
+    //                "arity error: expected 1 argument, got {}",
+    //                e.size()
+    //            ))?
+    //        };
+    //        let Pair(e, AstF::TheEmptyList) = *e else {
+    //            Err(format!(
+    //                "arity error: expected 1 argument, got {}", e.size()
+    //            ))?
+    //        };
+    //        Ok(e.syntax_to_datum())
+    //    })),
+    //);
+    //env.borrow_mut().define(
+    //    Symbol("syntax-e".into(), 0),
+    //    AstF::Function(Function::Primitive(move |e| {
+    //        let AstF::Pair(Pair(e)) = e else {
+    //            Err(format!(
+    //                "arity error: expected 1 argument, got {}",
+    //                e.size()
+    //            ))?
+    //        };
+    //        let Pair(AstF::Syntax(Syntax(e, _)), AstF::TheEmptyList) = *e else {
+    //            Err(format!(
+    //                "arity error: expected 1 argument, got {}",
+    //                e.size()
+    //            ))?
+    //        };
+    //        Ok(AstF::Symbol(e))
+    //    })),
+    //);
     env.borrow_mut().define(
         Symbol("cons".into(), 0),
-        AstF::Function(Function::Primitive(move |e| {
-            let AstF::Pair(Pair(e)) = e else {
+        Ast::new(AstF::Function(Function::Primitive(move |e| {
+            let AstF::Pair(Pair(ref car, ref rest)) = *e.out else {
                 Err(format!(
-                    "arity error: expected 2 argument, got {}",
-                    e.size()
+                    "arity error: expected 2 argument, missing first argument",
                 ))?
             };
-            let Pair(ref fst, AstF::Pair(Pair(ref last))) = *e else {
+            let AstF::Pair(Pair(ref cdr, ref rest)) = *rest.out else {
                 Err(format!(
-                    "arity error: expected 2 argument, got {}",
-                    e.size()
+                    "arity error: expected 2 argument, missing second argument",
                 ))?
             };
-            let Pair(ref snd, AstF::TheEmptyList) = **last else {
+            if *rest.out != AstF::TheEmptyList {
                 Err(format!(
-                    "arity error: expected 2 argument, got {}",
+                    "arity error: expected 2 argument, found more than 2, {}",
                     e.size()
                 ))?
-            };
-            Ok(AstF::Pair(Pair(Box::new(Pair(fst.clone(), snd.clone())))))
-        })),
+            }
+            Ok(Ast::new(AstF::Pair(Pair(car.clone(), cdr.clone()))))
+        }))),
     );
-    env.borrow_mut().define(
-        Symbol("car".into(), 0),
-        AstF::Function(Function::Primitive(move |e| {
-            let AstF::Pair(Pair(e)) = e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-
-            let Pair(AstF::Pair(Pair(e)), AstF::TheEmptyList) = *e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-            let Pair(fst, _) = *e;
-            Ok(fst)
-        })),
-    );
-    env.borrow_mut().define(
-        Symbol("cdr".into(), 0),
-        AstF::Function(Function::Primitive(move |e| {
-            println!("cdr {e}");
-            let AstF::Pair(Pair(e)) = e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-            let Pair(AstF::Pair(Pair(e)), AstF::TheEmptyList) = *e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-            let Pair(_, snd) = *e;
-            Ok(snd)
-        })),
-    );
-    env.borrow_mut().define(
-        Symbol("list".into(), 0),
-        AstF::Function(Function::Primitive(Ok)),
-    );
-    env.borrow_mut().define(
-        Symbol("map".into(), 0),
-        AstF::Function(Function::Primitive(move |e| {
-            let AstF::Pair(Pair(e)) = e else {
-                Err(format!(
-                    "arity error: expected 1 argument, got {}",
-                    e.size()
-                ))?
-            };
-
-            let Pair(AstF::Function(ref f), AstF::Pair(Pair(ref last))) = *e else {
-                Err(format!(
-                    "arity error: expected 2 argument, got {}",
-                    e.size()
-                ))?
-            };
-            let Pair(ref l, AstF::TheEmptyList) = **last else {
-                Err(format!(
-                    "arity error: expected 2 argument, got {}",
-                    e.size()
-                ))?
-            };
-            l.map(|a| f.apply(AstF::Pair(Pair(Box::new(Pair(a, AstF::TheEmptyList))))))
-        })),
-    );
+    //env.borrow_mut().define(
+    //    Symbol("car".into(), 0),
+    //    AstF::Function(Function::Primitive(move |e| {
+    //        let AstF::Pair(Pair(e)) = e else {
+    //            Err(format!(
+    //                "arity error: expected 1 argument, got {}",
+    //                e.size()
+    //            ))?
+    //        };
+    //
+    //        let Pair(AstF::Pair(Pair(e)), AstF::TheEmptyList) = *e else {
+    //            Err(format!(
+    //                "arity error: expected 1 argument, got {}",
+    //                e.size()
+    //            ))?
+    //        };
+    //        let Pair(fst, _) = *e;
+    //        Ok(fst)
+    //    })),
+    //);
+    //env.borrow_mut().define(
+    //    Symbol("cdr".into(), 0),
+    //    AstF::Function(Function::Primitive(move |e| {
+    //            println!("cdr {e}");
+    //            let AstF::Pair(Pair(e)) = e else {
+    //                Err(format!(
+    //                    "arity error: expected 1 argument, got {}",
+    //                    e.size()
+    //                ))?
+    //            };
+    //            let Pair(AstF::Pair(Pair(e)), AstF::TheEmptyList) = *e else {
+    //                Err(format!(
+    //                    "arity error: expected 1 argument, got {}",
+    //                    e.size()
+    //                ))?
+    //            };
+    //            let Pair(_, snd) = *e;
+    //            Ok(snd)
+    //        })),
+    //    );
+    //    env.borrow_mut().define(
+    //        Symbol("list".into(), 0),
+    //        AstF::Function(Function::Primitive(Ok)),
+    //    );
+    //    env.borrow_mut().define(
+    //        Symbol("map".into(), 0),
+    //        AstF::Function(Function::Primitive(move |e| {
+    //            let AstF::Pair(Pair(e)) = e else {
+    //                Err(format!(
+    //                    "arity error: expected 1 argument, got {}",
+    //                    e.size()
+    //                ))?
+    //            };
+    //
+    //            let Pair(AstF::Function(ref f), AstF::Pair(Pair(ref last))) = *e else {
+    //                Err(format!(
+    //                    "arity error: expected 2 argument, got {}",
+    //                    e.size()
+    //                ))?
+    //            };
+    //            let Pair(ref l, AstF::TheEmptyList) = **last else {
+    //                Err(format!(
+    //                    "arity error: expected 2 argument, got {}",
+    //                    e.size()
+    //                ))?
+    //            };
+    //            l.map(|a| f.apply(AstF::Pair(Pair(Box::new(Pair(a, AstF::TheEmptyList))))))
+    //        })),
+    //    );
     env
 }
 
@@ -988,13 +1052,16 @@ impl Env {
                     params: Ast,
                     args: Ast,
                 ) -> Option<String> {
-                    match (params, args) {
-                        (AstF::Pair(Pair(param)), AstF::Pair(Pair(arg))) => {
-                            let AstF::Symbol(p) = param.0 else {
+                    match (*params.out, *args.out) {
+                        (
+                            AstF::Pair(Pair(param, rest_params)),
+                            AstF::Pair(Pair(arg, rest_args)),
+                        ) => {
+                            let AstF::Symbol(p) = *param.out else {
                                 return Some(String::new());
                             };
-                            env.borrow_mut().define(p, arg.0);
-                            extend_envoirnment(env, param.1, arg.1)
+                            env.borrow_mut().define(p, arg);
+                            extend_envoirnment(env, rest_params, rest_args)
                         }
                         _ => None,
                     }
@@ -1017,62 +1084,154 @@ type EnvRef = Rc<RefCell<Env>>;
 
 pub struct Evaluator {}
 
+#[derive(Clone, Copy)]
+pub enum State {
+    Normal,
+    Application,
+    AplicationArgs,
+    Lambda,
+    LambdaParams,
+    Quote,
+    QuoteBody,
+    Define,
+    LambdaBody,
+    LambdaParam,
+}
 impl Evaluator {
     #[trace]
     fn eval(expr: Ast, env: EnvRef) -> Result<Ast, String> {
         println!("eval {expr}");
-        match expr {
-            AstF::Pair(list) => match list.0 {
-                AstF::Symbol(Symbol(ref lambda, 0)) if **lambda == *"lambda" => {
-                    let Pair(ref lambda_id, AstF::Pair(ref inner)) = *list else {
-                        Err(format!("invalid syntax {list:?} bad lambda"))?
-                    };
-                    let Pair(AstF::Pair(ref arg), AstF::Pair(ref body)) = **inner else {
-                        Err(format!("invalid syntax {list:?}, bad argument for lambda"))?
-                    };
-
-                    // TODO: variadic function with dot notation
-                    let args = arg.map(|arg| {
-                        if let AstF::Symbol(s) = arg {
-                            Ok(AstF::Symbol(s))
-                        } else {
-                            Err(format!("bad syntax {arg} is not a valid paramter"))
-                        }
-                    })?;
-                    Ok(AstF::Function(Function::Lambda(Lambda(
-                        Box::new(AstF::Pair(body.clone())),
-                        env,
-                        Box::new(args),
-                    ))))
-                }
-                AstF::Symbol(Symbol(quote, 0)) if *quote == *"quote" => {
-                    let Pair(_, AstF::Pair(datum)) = *list else {
-                        Err("bad syntax, quote requires one expression")?
-                    };
-                    let Pair(datum, AstF::TheEmptyList) = *datum else {
-                        Err("bad syntax, quote requires one expression")?
-                    };
-                    Ok(datum)
-                }
-                f => {
-                    let f = Self::eval(f, env.clone())?;
-                    let rest = list.1.map(|arg| Self::eval(arg, env.clone()))?;
-                    Self::execute_application(f, rest)
-                } //AstF::TheEmptyList => Err(format!("bad syntax {list:?}, empty application")),
+        (expr.zygomorphism(
+            &mut |expr| match expr {
+                AstF::Pair(pair) => pair.0,
+                AstF::Symbol(s) => match &*s.0 {
+                    "lambda" if s.1 == 0 => State::Lambda,
+                    "quote" if s.1 == 0 => State::Quote,
+                    "define" if s.1 == 0 => State::Define,
+                    "%app" if s.1 == 0 => State::Application,
+                    _ => State::Normal,
+                },
+                _ => State::Normal,
             },
-            AstF::Symbol(s) =>
-            //println!("variable {s})");
-            {
-                env.borrow().lookup(&s).ok_or(format!("free variable {s}"))
-            }
-            //.inspect(|x|println!("variable {x}"))
-            ,
-            _ => Ok(expr.clone()),
-        }
+            &mut |expr: AstF<(State, Box<dyn AnalyzeStateFn>)>| {
+                match expr {
+                    AstF::Pair(Pair(car, cdr)) => Box::new(move |env, state| {
+                        let car = car.clone();
+                        let cdr = cdr.clone();
+                        match state {
+                            State::Normal => cdr.1(env, car.0),
+                            State::Application => {
+                                let function = car.1(env.clone(), State::Normal)?;
+                                let args = cdr.1(env, State::AplicationArgs)?;
+                                Self::execute_application(function, args)
+                            }
+                            State::AplicationArgs => Ok(Ast::new(AstF::Pair(Pair(
+                                car.1(env.clone(), State::Normal)?,
+                                cdr.1(env, State::AplicationArgs)?,
+                            )))),
+                            State::Lambda => {
+                                let args = car.1(env.clone(), State::LambdaParams)?;
+                                let body = Box::new(move |env| cdr.1(env, State::LambdaBody));
+                                Ok(Ast::new(AstF::Function(Function::Lambda(Lambda(
+                                    body, env, args,
+                                )))))
+                            }
+                            State::LambdaParams => Ok(Ast::new(AstF::Pair(Pair(
+                                car.1(env.clone(), State::LambdaParam)?,
+                                cdr.1(env, State::LambdaParams)?,
+                            )))),
+                            State::QuoteBody => Ok(Ast::new(AstF::Pair(Pair(
+                                car.1(env.clone(), State::QuoteBody)?,
+                                cdr.1(env, State::QuoteBody)?,
+                            )))),
+                            State::Define => todo!(),
+                            State::Quote => {
+                                if *cdr.1(env.clone(), State::QuoteBody)?.out != AstF::TheEmptyList
+                                {
+                                    Err("bad syntax, quote requires one expression")?
+                                }
+                                car.1(env.clone(), State::QuoteBody)
+                            }
+                            State::LambdaParam => panic!(),
+                            State::LambdaBody => {
+                                if *cdr.1(env.clone(), State::QuoteBody)?.out != AstF::TheEmptyList
+                                {
+                                    Err("bad syntax, quote requires one expression")?
+                                }
+                                car.1(env.clone(), State::Normal)
+                            }
+                        }
+                    }),
+
+                    // TODO: fail for lambda params unless the empty list
+                    AstF::Symbol(s) => Box::new(move |env: EnvRef, state: State| match state {
+                        State::Normal => env
+                            .borrow()
+                            .lookup(&s)
+                            .ok_or(format!("free variable {}", &s)),
+                        _ => Ok(Ast::new(AstF::Symbol(s.clone()))),
+                    }),
+                    AstF::TheEmptyList => Box::new(move |_, _| Ok(Ast::new(AstF::TheEmptyList))),
+                    AstF::Syntax(s) => Box::new(move |_, _| Ok(Ast::new(AstF::Syntax(s.clone())))),
+                    AstF::Function(f) => {
+                        Box::new(move |_, _| Ok(Ast::new(AstF::Function(f.clone()))))
+                    }
+                    AstF::Number(n) => Box::new(move |_, _| Ok(Ast::new(AstF::Number(n.clone())))),
+                }
+            },
+        ))(env, State::Normal)
+        //match expr {
+        //    AstF::Pair(list) => match list.0 {
+        //        AstF::Symbol(Symbol(ref lambda, 0)) if **lambda == *"lambda" => {
+        //            let Pair(ref lambda_id, AstF::Pair(ref inner)) = *list else {
+        //                Err(format!("invalid syntax {list:?} bad lambda"))?
+        //            };
+        //            let Pair(AstF::Pair(ref arg), AstF::Pair(ref body)) = **inner else {
+        //                Err(format!("invalid syntax {list:?}, bad argument for lambda"))?
+        //            };
+        //
+        //            // TODO: variadic function with dot notation
+        //            let args = arg.map(|arg| {
+        //                if let AstF::Symbol(s) = arg {
+        //                    Ok(AstF::Symbol(s))
+        //                } else {
+        //                    Err(format!("bad syntax {arg} is not a valid paramter"))
+        //                }
+        //            })?;
+        //            Ok(AstF::Function(Function::Lambda(Lambda(
+        //                Box::new(AstF::Pair(body.clone())),
+        //                env,
+        //                Box::new(args),
+        //            ))))
+        //        }
+        //        AstF::Symbol(Symbol(quote, 0)) if *quote == *"quote" => {
+        //            let Pair(_, AstF::Pair(datum)) = *list else {
+        //                Err("bad syntax, quote requires one expression")?
+        //            };
+        //            let Pair(datum, AstF::TheEmptyList) = *datum else {
+        //                Err("bad syntax, quote requires one expression")?
+        //            };
+        //            Ok(datum)
+        //        }
+        //        f => {
+        //            let f = Self::eval(f, env.clone())?;
+        //            let rest = list.1.map(|arg| Self::eval(arg, env.clone()))?;
+        //            Self::execute_application(f, rest)
+        //        } //AstF::TheEmptyList => Err(format!("bad syntax {list:?}, empty application")),
+        //    },
+        //    AstF::Symbol(s) =>
+        //    //println!("variable {s})");
+        //    {
+        //        env.borrow().lookup(&s).ok_or(format!("free variable {s}"))
+        //    }
+        //    //.inspect(|x|println!("variable {x}"))
+        //    ,
+        //    _ => Ok(expr.clone()),
+        //}
     }
 
     fn execute_application(f: Ast, args: Ast) -> Result<Ast, String> {
-        if let AstF::Function(f) = f {
+        if let AstF::Function(f) = *f.out {
             f.apply(args)
             //.inspect(|x|println!("application {x}"))
         } else {
@@ -1083,14 +1242,14 @@ impl Evaluator {
     }
 
     fn eval_sequence(body: Ast, env: Rc<RefCell<Env>>) -> Result<Ast, String> {
-        let AstF::Pair(Pair(pair)) = body else {
+        let AstF::Pair(Pair(car, cdr)) = *body.out else {
             return Err(format!("not a sequence {body}"));
         };
-        if pair.1 == AstF::TheEmptyList {
-            Self::eval(pair.0, env)
+        if *cdr.out == AstF::TheEmptyList {
+            Self::eval(car, env)
         } else {
-            Self::eval(pair.0, env.clone())?;
-            Self::eval_sequence(pair.1, env)
+            Self::eval(car, env.clone())?;
+            Self::eval_sequence(cdr, env)
         }
     }
 }
@@ -1227,14 +1386,17 @@ impl Reader {
         match (first.as_str(), second.as_str(), last.as_str()) {
             ("", "." | "", "") => Err(("invalid syntax dangling dot".to_owned(), input)),
             (_, _, "") => match format!("{first}{second}").parse::<f64>() {
-                Ok(n) => Ok((AstF::Number(n), input)),
+                Ok(n) => Ok((Ast::new(AstF::Number(n)), input)),
                 Err(e) => Err((e.to_string(), input)),
             },
 
             (first, second, _) => {
                 let (last, input) = Self::read_symbol_inner(input);
                 Ok((
-                    AstF::Symbol(Symbol(format!("{first}{second}{last}").into(), 0)),
+                    Ast::new(AstF::Symbol(Symbol(
+                        format!("{first}{second}{last}").into(),
+                        0,
+                    ))),
                     input,
                 ))
             }
@@ -1252,7 +1414,7 @@ impl Reader {
     // #[trace(format_enter = "", format_exit = "")]
     fn read_symbol(input: Input) -> ReaderInnerResult {
         let (symbol, input) = Self::read_symbol_inner(input);
-        Ok((AstF::Symbol(Symbol(symbol.into(), 0)), input))
+        Ok((Ast::new(AstF::Symbol(Symbol(symbol.into(), 0))), input))
     }
 
     // #[trace(format_enter = "", format_exit = "")]
@@ -1265,7 +1427,7 @@ impl Reader {
             // TODO: dot tailed list and pair instead of list
             Some(')') => {
                 input.next();
-                Ok((AstF::TheEmptyList, input))
+                Ok((Ast::new(AstF::TheEmptyList), input))
             }
             Some('.') => {
                 let item: Ast;
@@ -1278,7 +1440,7 @@ impl Reader {
                 (item, input) = Self::read_inner(input, empty_continuation)?;
                 let item2: Ast;
                 (item2, input) = Self::read_list(input, empty_continuation)?;
-                Ok((AstF::Pair(Pair(Box::new(Pair(item, item2)))), input))
+                Ok((Ast::new(AstF::Pair(Pair(item, item2))), input))
             }
             None => {
                 input = empty_continuation()
@@ -1384,23 +1546,24 @@ fn main() {
         stdin.read_line(&mut input).unwrap();
         input
     };
-    let mut expander = Expander::new();
+    //let mut expander = Expander::new();
     loop {
         print!("\n>> ",);
 
         let ast = reader
             .read_with_continue(newline)
             .inspect(|e| println!("after reader: {e}"))
-            .and_then(|ast| {
-                expander.expand(
-                    expander.namespace_syntax_introduce(ast.datum_to_syntax()),
-                    CompileTimeEnvoirnment::new(),
-                )
-            })
-            .inspect(|e| println!("after expansion: {e}"))
-            .and_then(|ast| expander.compile(ast))
-            .inspect(|e| println!("after expansion part 2: {e}"))
-            .and_then(|ast| expander.eval_compiled(ast));
+            //.and_then(|ast| {
+            //    expander.expand(
+            //        expander.namespace_syntax_introduce(ast.datum_to_syntax()),
+            //        CompileTimeEnvoirnment::new(),
+            //    )
+            //})
+            //.inspect(|e| println!("after expansion: {e}"))
+            //.and_then(|ast| expander.compile(ast))
+            //.inspect(|e| println!("after expansion part 2: {e}"))
+            //.and_then(|ast| expander.eval_compiled(ast));
+            .and_then(|e| Evaluator::eval(e, new_env()));
         match ast {
             Ok(expr) => println!("{expr}"),
             Err(e) => println!("{e}"),
