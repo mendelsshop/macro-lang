@@ -659,29 +659,15 @@ impl Expander<Binding> {
     }
 
     fn expand_let_syntax(&mut self, s: Pair, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        // `(,let-syntax-id ([,lhs-id ,rhs])
+        // `(,let-syntax-id ([,lhs-id ,rhs] ...)
         //            ,body)
         // (cons 'let-syntax (cons (cons (cons 'lhs (cons 'rhs '())) '()) (cons 'body '())))
+        // (let-syntax (...) ...)
         let Pair(ref _let_syntax_id, Ast::Pair(ref inner)) = s else {
             Err(format!("invalid syntax {s:?} bad let-syntax"))?
         };
-        let Pair(Ast::Pair(ref binder_list), Ast::Pair(ref body)) = **inner else {
+        let Pair(ref binder_list, Ast::Pair(ref body)) = **inner else {
             Err(format!("invalid syntax {s:?} bad let-syntax {:?}", inner.0))?
-        };
-        let Pair(Ast::Pair(ref binder_list), Ast::TheEmptyList) = **binder_list else {
-            Err(format!(
-                "invalid syntax {s:?}, bad binder list for let-syntax {binder_list:?}"
-            ))?
-        };
-        let Pair(Ast::Syntax(ref lhs_id), Ast::Pair(ref rhs_list)) = **binder_list else {
-            Err(format!(
-                "invalid syntax {s:?}, bad binder for let-syntax {binder_list:?}"
-            ))?
-        };
-        let Pair(ref rhs, Ast::TheEmptyList) = **rhs_list else {
-            Err(format!(
-                "invalid syntax {s:?}, bad binder list for let-syntax {rhs_list:?}"
-            ))?
         };
         let Pair(ref body, Ast::TheEmptyList) = **body else {
             Err(format!(
@@ -689,13 +675,35 @@ impl Expander<Binding> {
             ))?
         };
         let sc = self.scope_creator.new_scope();
-        let id = lhs_id.clone().add_scope(sc);
-        let binding = self.add_local_binding(id);
-        let rhs_val = self.eval_for_syntax_binding(rhs.clone())?;
-        let body_env = env.extend(binding, rhs_val);
+        let binders = binder_list.clone().foldl(
+            |binder, env: Result<CompileTimeEnvoirnment, String>| {
+                let env = env?;
+                let Ast::Pair(binder_list) = binder else {
+                    Err(format!(
+                        "invalid syntax {s:?}, bad binder list for let-syntax {binder_list:?}"
+                    ))?
+                };
+                let Pair(Ast::Syntax(ref lhs_id), Ast::Pair(ref rhs_list)) = *binder_list else {
+                    Err(format!(
+                        "invalid syntax {s:?}, bad binder for let-syntax {binder_list:?}"
+                    ))?
+                };
+                let Pair(ref rhs, Ast::TheEmptyList) = **rhs_list else {
+                    Err(format!(
+                        "invalid syntax {s:?}, bad binder list for let-syntax {rhs_list:?}"
+                    ))?
+                };
+                let id = lhs_id.clone().add_scope(sc);
+                let binding = self.add_local_binding(id);
+                let rhs_val = self.eval_for_syntax_binding(rhs.clone())?;
+                let body_env = env.extend(binding, rhs_val);
+                Ok(body_env)
+            },
+            Ok(env),
+        )??;
         //println!("found macro {binding}");
         //println!("expand {body} in {body_env:?}");
-        self.expand(body.clone().add_scope(sc), body_env)
+        self.expand(body.clone().add_scope(sc), binders)
     }
 
     fn eval_for_syntax_binding(&mut self, rhs: Ast) -> Result<CompileTimeBinding, String> {
