@@ -475,7 +475,7 @@ impl Expander<Binding> {
         } else if self.core_primitives.contains(binding) {
             Ok(Ast::Syntax(s))
         } else {
-            //println!("{:?}", env);
+            println!("lookup {s:?} {:?}", env);
             let Binding::Variable(binding) = binding else {
                 panic!()
             };
@@ -943,30 +943,33 @@ impl Env {
 
     fn extend_envoirnment(env: EnvRef, params: Ast, args: Ast) -> Result<EnvRef, String> {
         let new_envoirnment = Self::new_scope(env);
-        match params.size().cmp(&args.size()) {
-            Ordering::Less => Err("arity error to many arguments passed in".to_string()),
-            Ordering::Greater => Err("arity error to little arguments passed in".to_string()),
-            Ordering::Equal => {
-                fn extend_envoirnment(
-                    env: Rc<RefCell<Env>>,
-                    params: Ast,
-                    args: Ast,
-                ) -> Option<String> {
-                    match (params, args) {
-                        (Ast::Pair(param), Ast::Pair(arg)) => {
-                            let Ast::Symbol(p) = param.0 else {
-                                return Some(String::new());
-                            };
-                            env.borrow_mut().define(p, arg.0);
-                            extend_envoirnment(env, param.1, arg.1)
-                        }
-                        _ => None,
-                    }
+        fn extend_envoirnment(env: Rc<RefCell<Env>>, params: Ast, args: Ast) -> Result<(), String> {
+            match (params, args) {
+                (Ast::Pair(param), Ast::Pair(arg)) => {
+                    let Ast::Symbol(p) = param.0 else {
+                        return Err(format!(
+                            "{} is not a symbol (cannot be function arguement)",
+                            param.1
+                        ));
+                    };
+                    env.borrow_mut().define(p, arg.0);
+                    extend_envoirnment(env, param.1, arg.1)
                 }
-                extend_envoirnment(new_envoirnment.clone(), params, args);
-                Ok(new_envoirnment)
+                (Ast::Symbol(s), rest) => {
+                    env.borrow_mut().define(s, rest);
+                    Ok(())
+                }
+                (Ast::TheEmptyList, Ast::TheEmptyList) => Ok(()),
+                (Ast::TheEmptyList, rest) => Err(format!(
+                    "arity mismatch these arguments do not have any coresponding parameters {rest}"
+                )),
+                (rest, Ast::TheEmptyList) => Err(format!(
+                    "arity mismatch these parameters do not have any coresponding aruments {rest}"
+                )),
+                (arg, _) => Err(format!("bad argument expected symbol found: {arg}")),
             }
         }
+        extend_envoirnment(new_envoirnment.clone(), params, args).map(|_| new_envoirnment)
     }
 
     fn new() -> EnvRef {
