@@ -475,7 +475,7 @@ impl Expander<Binding> {
         } else if self.core_primitives.contains(binding) {
             Ok(Ast::Syntax(s))
         } else {
-            println!("lookup {s:?} {:?}", env);
+            //println!("lookup {s:?} {:?}", env);
             let Binding::Variable(binding) = binding else {
                 panic!()
             };
@@ -650,7 +650,7 @@ impl Expander<Binding> {
 
     #[trace::trace()]
     fn compile(&self, rhs: Ast) -> Result<Ast, String> {
-        println!("compile {rhs}");
+        //println!("compile {rhs}");
         match rhs {
             Ast::Pair(l) => {
                 let core_sym = if let Ast::Syntax(ref s) = l.0 {
@@ -855,7 +855,7 @@ fn new_env() -> Rc<RefCell<Env>> {
     env.borrow_mut().define(
         Symbol("cdr".into(), 0),
         Ast::Function(Function::Primitive(move |e| {
-            println!("cdr {e}");
+            //println!("cdr {e}");
             let Ast::Pair(e) = e else {
                 Err(format!(
                     "arity error: expected 1 argument, got {}",
@@ -987,7 +987,7 @@ pub struct Evaluator {}
 impl Evaluator {
     #[trace]
     fn eval(expr: Ast, env: EnvRef) -> Result<Ast, String> {
-        println!("eval {expr}");
+        //println!("eval {expr}");
         match expr {
             Ast::Pair(list) => match list.0 {
                 Ast::Symbol(Symbol(ref lambda, 0)) if **lambda == *"lambda" => {
