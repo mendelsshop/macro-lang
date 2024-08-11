@@ -1139,7 +1139,18 @@ impl Reader {
                 input.next();
                 Err(("unfinished pair".to_string(), input))
             }
-
+            Some('\'') => {
+                input.next();
+                Self::read_inner(input, empty_continuation).map(|(quoted, input)| {
+                    (
+                        Ast::Pair(Box::new(Pair(
+                            Ast::Symbol("quote".into()),
+                            Ast::Pair(Box::new(Pair(quoted, Ast::TheEmptyList))),
+                        ))),
+                        input,
+                    )
+                })
+            }
             Some(n) if n.is_ascii_digit() => Self::read_number(input),
             Some(_) => Self::read_symbol(input),
             None => empty_continuation()
@@ -1234,6 +1245,7 @@ impl Reader {
             }
             Some('.') => {
                 let item: Ast;
+                input.next();
                 (item, input) = Self::read_inner(input, empty_continuation)?;
                 input = Self::read_end_parenthesis(input, empty_continuation)?;
                 Ok((item, input))
