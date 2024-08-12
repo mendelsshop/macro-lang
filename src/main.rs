@@ -281,16 +281,21 @@ impl Ast {
     #[must_use]
     pub fn datum_to_syntax(self) -> Self {
         match self {
-            list if list.list() => list.map(|x| Ok(x.datum_to_syntax())).unwrap_or(list),
-            Self::Syntax(_) => self,
             Self::Symbol(s) => Self::Syntax(Syntax::new(s)),
+            Self::Pair(pair) => Self::Pair(Box::new(Pair(
+                pair.0.datum_to_syntax(),
+                pair.1.datum_to_syntax(),
+            ))),
             _ => self,
         }
     }
     fn syntax_to_datum(self) -> Self {
         match self {
-            list if list.list() => list.map(|x| Ok(x.syntax_to_datum())).unwrap_or(list),
             Self::Syntax(Syntax(s, _)) => Self::Symbol(s),
+            Self::Pair(pair) => Self::Pair(Box::new(Pair(
+                pair.0.syntax_to_datum(),
+                pair.1.syntax_to_datum(),
+            ))),
             _ => self,
         }
     }
