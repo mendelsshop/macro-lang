@@ -68,33 +68,3 @@ fn main() {
         }
     }
 }
-
-//#[cfg(test)]
-//mod tests {
-//    use std::collections::BTreeSet;
-//
-//    use crate::{AdjustScope, Ast, Binding, Expander, Scope, Symbol, Syntax, UniqueNumberManager};
-//
-//
-//
-//    #[test]
-//    fn resolve_test_lambda_empty() {
-//        let expander = Expander::new();
-//
-//        assert_eq!(
-//            expander.resolve(&Syntax("lambda".into(), BTreeSet::new())),
-//            Err("free variable lambda".to_string())
-//        );
-//    }
-//
-//    #[test]
-//    fn resolve_test_lambda_core() {
-//        let expander = Expander::new();
-//
-//        println!("{expander:?}");
-//        assert_eq!(
-//            expander.resolve(&expander.introduce(Syntax("lambda".into(), BTreeSet::new()))),
-//            Ok(&Binding::Lambda)
-//        );
-//    }
-//}

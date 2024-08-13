@@ -123,11 +123,11 @@ impl Expander<Binding> {
         let id = candidate_ids
             .clone()
             .max_by_key(|id| id.1.len())
-            .ok_or(format!("free variable {id:?}"))?;
+            .ok_or(format!("free variable {}", id.0))?;
         if check_unambiguous(id, candidate_ids) {
             self.all_bindings
                 .get(id)
-                .ok_or(format!("free variable {}", id.0 .0))
+                .ok_or(format!("free variable {}", id.0))
         } else {
             Err(format!("ambiguous binding {}", id.0 .0))
         }
@@ -515,12 +515,15 @@ macro_rules! list {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeSet, HashSet};
 
     use crate::{
         ast::{bound_identifier, AdjustScope, Ast, Scope, Symbol, Syntax},
+        expander::{CompileTimeBinding, CompileTimeEnvoirnment},
         UniqueNumberManager,
     };
+
+    use super::{check_unambiguous, Binding, Expander};
 
     #[test]
     fn bound_identifier_same() {
@@ -697,6 +700,246 @@ mod tests {
         assert_eq!(
             Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1, sc2]))).flip_scope(sc2),
             Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1,])))
+        );
+    }
+    #[test]
+    pub fn resolve_test_bound_once() {
+        let mut expander = Expander::new();
+        let loc_a = Binding::Variable(expander.scope_creator.gen_sym("a"));
+        let sc1 = expander.scope_creator.new_scope();
+        let sc2 = expander.scope_creator.new_scope();
+        expander.add_binding(Syntax("a".into(), BTreeSet::from([sc1])), loc_a.clone());
+
+        assert_eq!(
+            expander.resolve(&Syntax("a".into(), BTreeSet::from([sc1]))),
+            Ok(&loc_a)
+        );
+        assert_eq!(
+            expander.resolve(&Syntax("a".into(), BTreeSet::from([sc1, sc2]))),
+            Ok(&loc_a)
+        );
+    }
+    #[test]
+    pub fn resolve_test_shadow() {
+        let mut expander = Expander::new();
+        let loc_b_out = Binding::Variable(expander.scope_creator.gen_sym("b"));
+        let loc_b_in = Binding::Variable(expander.scope_creator.gen_sym("b"));
+        let sc1 = expander.scope_creator.new_scope();
+        let sc2 = expander.scope_creator.new_scope();
+
+        expander.add_binding(Syntax("b".into(), BTreeSet::from([sc1])), loc_b_out.clone());
+        expander.add_binding(
+            Syntax("b".into(), BTreeSet::from([sc1, sc2])),
+            loc_b_in.clone(),
+        );
+
+        assert_eq!(
+            expander.resolve(&Syntax("b".into(), BTreeSet::from([sc1]))),
+            Ok(&loc_b_out)
+        );
+        assert_eq!(
+            expander.resolve(&Syntax("b".into(), BTreeSet::from([sc1, sc2]))),
+            Ok(&loc_b_in)
+        );
+        assert!(expander
+            .resolve(&Syntax("b".into(), BTreeSet::from([sc2])))
+            .is_err_and(|e| e.contains("free variable")));
+    }
+    #[test]
+    pub fn resolve_test_ambiguous() {
+        let mut expander = Expander::new();
+        let loc_c1 = Binding::Variable(expander.scope_creator.gen_sym("c"));
+        let loc_c2 = Binding::Variable(expander.scope_creator.gen_sym("c"));
+        let sc1 = expander.scope_creator.new_scope();
+        let sc2 = expander.scope_creator.new_scope();
+        expander.add_binding(Syntax("c".into(), BTreeSet::from([sc1])), loc_c1.clone());
+        expander.add_binding(Syntax("c".into(), BTreeSet::from([sc2])), loc_c2.clone());
+
+        assert_eq!(
+            expander.resolve(&Syntax("c".into(), BTreeSet::from([sc1]))),
+            Ok(&loc_c1)
+        );
+        assert!(expander
+            .resolve(&Syntax("c".into(), BTreeSet::from([sc1, sc2])))
+            .is_err_and(|e| e.contains("ambiguous")));
+        assert_eq!(
+            expander.resolve(&Syntax("c".into(), BTreeSet::from([sc2]))),
+            Ok(&loc_c2)
+        );
+    }
+    #[test]
+    fn find_all_bindings_test_bound_once() {
+        let mut expander = Expander::new();
+        let loc_a = Binding::Variable(expander.scope_creator.gen_sym("a"));
+        let sc1 = expander.scope_creator.new_scope();
+        let sc2 = expander.scope_creator.new_scope();
+        expander.add_binding(Syntax("a".into(), BTreeSet::from([sc1])), loc_a);
+        assert_eq!(
+            expander
+                .find_all_matching_bindings(&Syntax("a".into(), BTreeSet::from([sc1])))
+                .collect::<Vec<_>>(),
+            vec![&Syntax("a".into(), BTreeSet::from([sc1]))]
+        );
+        assert_eq!(
+            expander
+                .find_all_matching_bindings(&Syntax("a".into(), BTreeSet::from([sc2])))
+                .count(),
+            0
+        );
+    }
+    #[test]
+    pub fn find_all_bindings_test_shadow() {
+        let mut expander = Expander::new();
+        let loc_b_out = Binding::Variable(expander.scope_creator.gen_sym("b"));
+        let loc_b_in = Binding::Variable(expander.scope_creator.gen_sym("b"));
+        let sc1 = expander.scope_creator.new_scope();
+        let sc2 = expander.scope_creator.new_scope();
+
+        expander.add_binding(Syntax("b".into(), BTreeSet::from([sc1])), loc_b_out);
+        expander.add_binding(Syntax("b".into(), BTreeSet::from([sc1, sc2])), loc_b_in);
+        assert_eq!(
+            expander
+                .find_all_matching_bindings(&Syntax("b".into(), BTreeSet::from([sc1, sc2])))
+                .collect::<HashSet<_>>(),
+            HashSet::from([
+                &Syntax("b".into(), BTreeSet::from([sc1])),
+                &Syntax("b".into(), BTreeSet::from([sc1, sc2]))
+            ])
+        );
+    }
+    #[test]
+    pub fn find_all_bindings_test_ambiguous() {
+        let mut expander = Expander::new();
+        let loc_c1 = Binding::Variable(expander.scope_creator.gen_sym("c"));
+        let loc_c2 = Binding::Variable(expander.scope_creator.gen_sym("c"));
+        let sc1 = expander.scope_creator.new_scope();
+        let sc2 = expander.scope_creator.new_scope();
+        expander.add_binding(Syntax("c".into(), BTreeSet::from([sc1])), loc_c1);
+        expander.add_binding(Syntax("c".into(), BTreeSet::from([sc2])), loc_c2);
+        assert_eq!(
+            expander
+                .find_all_matching_bindings(&Syntax("c".into(), BTreeSet::from([sc1, sc2])))
+                .collect::<HashSet<_>>(),
+            HashSet::from([
+                &Syntax("c".into(), BTreeSet::from([sc1])),
+                &Syntax("c".into(), BTreeSet::from([sc2]))
+            ])
+        );
+    }
+
+    #[test]
+    pub fn check_ambiguous_test_non_ambiguous() {
+        let mut scope_creator = UniqueNumberManager::new();
+        let sc1 = scope_creator.new_scope();
+        let sc2 = scope_creator.new_scope();
+
+        assert!(check_unambiguous(
+            &Syntax("b".into(), BTreeSet::from([sc1, sc2])),
+            [
+                &Syntax("b".into(), BTreeSet::from([sc1])),
+                &Syntax("b".into(), BTreeSet::from([sc1, sc2]))
+            ]
+            .into_iter()
+        ));
+    }
+    #[test]
+    pub fn check_ambiguous_test_ambiguous() {
+        let mut scope_creator = UniqueNumberManager::new();
+        let sc1 = scope_creator.new_scope();
+        let sc2 = scope_creator.new_scope();
+
+        assert!(!check_unambiguous(
+            &Syntax("c".into(), BTreeSet::from([sc2])),
+            [
+                &Syntax("c".into(), BTreeSet::from([sc1])),
+                &Syntax("c".into(), BTreeSet::from([sc2]))
+            ]
+            .into_iter()
+        ));
+    }
+    #[test]
+    fn free_identifier_test_bound_once() {
+        let mut expander = Expander::new();
+        let loc_a = Binding::Variable(expander.scope_creator.gen_sym("a"));
+        let sc1 = expander.scope_creator.new_scope();
+        let sc2 = expander.scope_creator.new_scope();
+        expander.add_binding(Syntax("a".into(), BTreeSet::from([sc1])), loc_a);
+        assert!(expander.free_identifier(
+            Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+            Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1, sc2])))
+        ));
+    }
+    #[test]
+    pub fn free_identifier_test_shadow() {
+        let mut expander = Expander::new();
+        let loc_b_out = Binding::Variable(expander.scope_creator.gen_sym("b"));
+        let loc_b_in = Binding::Variable(expander.scope_creator.gen_sym("b"));
+        let sc1 = expander.scope_creator.new_scope();
+        let sc2 = expander.scope_creator.new_scope();
+        expander.add_binding(Syntax("b".into(), BTreeSet::from([sc1])), loc_b_out);
+        expander.add_binding(Syntax("b".into(), BTreeSet::from([sc1, sc2])), loc_b_in);
+        assert!(!expander.free_identifier(
+            Ast::Syntax(Syntax("b".into(), BTreeSet::from([sc1]))),
+            Ast::Syntax(Syntax("b".into(), BTreeSet::from([sc1, sc2])))
+        ));
+    }
+
+    #[test]
+    fn resolve_test_lambda_empty() {
+        let expander = Expander::new();
+
+        assert!(expander
+            .resolve(&Syntax("lambda".into(), BTreeSet::new()))
+            .is_err_and(|error| error.contains("free variable")),);
+    }
+
+    #[test]
+    fn resolve_test_lambda_core() {
+        let expander = Expander::new();
+
+        assert_eq!(
+            expander.resolve(
+                &expander.namespace_syntax_introduce(Syntax("lambda".into(), BTreeSet::new()))
+            ),
+            Ok(&Binding::Lambda)
+        );
+    }
+
+    #[test]
+    fn env_lookup_test_empty() {
+        let mut expander = Expander::new();
+        let loc_a = expander.scope_creator.gen_sym("a");
+        let sc1 = expander.scope_creator.new_scope();
+        expander.add_binding(
+            Syntax("a".into(), BTreeSet::from([sc1])),
+            Binding::Variable(loc_a.clone()),
+        );
+        let env = CompileTimeEnvoirnment::new();
+        assert!(env.lookup(&loc_a).is_none());
+    }
+    #[test]
+    fn env_lookup_test_present() {
+        let mut expander = Expander::new();
+        let loc_a = expander.scope_creator.gen_sym("a");
+        let sc1 = expander.scope_creator.new_scope();
+        expander.add_binding(
+            Syntax("a".into(), BTreeSet::from([sc1])),
+            Binding::Variable(loc_a.clone()),
+        );
+        let env = CompileTimeEnvoirnment::new();
+        let env = env.extend(loc_a.clone(), CompileTimeBinding::Symbol("a".into()));
+        assert!(env.lookup(&loc_a).is_some());
+    }
+
+    #[test]
+    fn add_local_binding_test() {
+        let mut expander = Expander::new();
+        let sc1 = expander.scope_creator.new_scope();
+        let sc2 = expander.scope_creator.new_scope();
+        let loc_d = expander.add_local_binding(Syntax("d".into(), BTreeSet::from([sc1, sc2])));
+        assert_eq!(
+            expander.resolve(&Syntax("d".into(), BTreeSet::from([sc1, sc2]))),
+            Ok(&Binding::Variable(loc_d))
         );
     }
 }
