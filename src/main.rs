@@ -17,7 +17,6 @@ struct UniqueNumberManager(usize);
 
 impl UniqueNumberManager {
     fn new() -> Self {
-        
         Self(1)
     }
 
@@ -76,57 +75,7 @@ fn main() {
 //
 //    use crate::{AdjustScope, Ast, Binding, Expander, Scope, Symbol, Syntax, UniqueNumberManager};
 //
-//    #[test]
-//    fn identifier_test_with_empty_syntax() {
-//        assert!(Ast::Syntax(Syntax::new("a".into())).identifier());
-//    }
 //
-//    #[test]
-//    fn datum_to_syntax_with_identifier() {
-//        assert_eq!(
-//            Ast::Symbol(Symbol("a".into(), 0)).datum_to_syntax(),
-//            Ast::Syntax(Syntax("a".into(), BTreeSet::new()))
-//        );
-//    }
-//
-//    #[test]
-//    fn datum_to_syntax_with_number() {
-//        assert_eq!(Ast::Number(1.0).datum_to_syntax(), Ast::Number(1.0));
-//    }
-//
-//    #[test]
-//    fn datum_to_syntax_with_list() {
-//        assert_eq!(
-//            Ast::List(vec![
-//                Ast::Symbol(Symbol("a".into(), 0)),
-//                Ast::Symbol(Symbol("b".into(), 0)),
-//                Ast::Symbol(Symbol("c".into(), 0)),
-//            ])
-//            .datum_to_syntax(),
-//            Ast::List(vec![
-//                Ast::Syntax(Syntax("a".into(), BTreeSet::new())),
-//                Ast::Syntax(Syntax("b".into(), BTreeSet::new())),
-//                Ast::Syntax(Syntax("c".into(), BTreeSet::new())),
-//            ])
-//        );
-//    }
-//
-//    #[test]
-//    fn datum_to_syntax_with_list_and_syntax() {
-//        assert_eq!(
-//            Ast::List(vec![
-//                Ast::Symbol(Symbol("a".into(), 0)),
-//                Ast::Syntax(Syntax("b".into(), BTreeSet::from([Scope(0), Scope(1)]))),
-//                Ast::Symbol(Symbol("c".into(), 0)),
-//            ])
-//            .datum_to_syntax(),
-//            Ast::List(vec![
-//                Ast::Syntax(Syntax("a".into(), BTreeSet::new())),
-//                Ast::Syntax(Syntax("b".into(), BTreeSet::from([Scope(0), Scope(1)]))),
-//                Ast::Syntax(Syntax("c".into(), BTreeSet::new())),
-//            ])
-//        );
-//    }
 //    #[test]
 //    fn syntax_to_datum_with_identifier() {
 //        assert_eq!(

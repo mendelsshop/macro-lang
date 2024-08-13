@@ -243,7 +243,7 @@ impl Ast {
             Self::Pair(p) => {
                 let Pair(car, cdr) = *p;
                 let car = f(car, false, init);
-                
+
                 cdr.foldl_pair(f, car)
             }
             other_term => f(other_term, true, init),
