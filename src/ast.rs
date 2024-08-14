@@ -90,7 +90,7 @@ pub enum Function {
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Lambda(l) => write!(f, "(lambda {} {}", l.2, l.0),
+            Self::Lambda(l) => write!(f, "(lambda {} {})", l.2, l.0),
             Self::Primitive(_) => write!(f, "(primitive-procedure)"),
         }
     }

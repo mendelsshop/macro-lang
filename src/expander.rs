@@ -57,6 +57,7 @@ pub struct Expander<T> {
     pub(crate) core_forms: BTreeSet<Binding>,
     pub(crate) core_primitives: BTreeSet<Binding>,
     pub(crate) core_scope: Scope,
+    pub(crate) variable: Symbol,
     pub(crate) scope_creator: UniqueNumberManager,
     pub(crate) env: evaluator::EnvRef,
 }
@@ -89,12 +90,14 @@ impl Expander<Binding> {
             Binding::Variable("cdr".into()),
             Binding::Variable("map".into()),
         ]);
+        let variable = scope_creator.gen_sym("variable");
         let mut this = Self {
             scope_creator,
             core_scope,
             core_primitives,
             core_forms,
             all_bindings: HashMap::new(),
+            variable,
             env: Env::new_env(),
         };
         this.core_forms
@@ -176,14 +179,14 @@ impl Expander<Binding> {
         } else if self.core_primitives.contains(binding) {
             Ok(Ast::Syntax(s))
         } else {
-            //println!("lookup {s:?} {:?}", env);
             let Binding::Variable(binding) = binding else {
                 panic!()
             };
             let v = env.lookup(binding).ok_or(format!("out of context {s:?}"))?;
             match v {
-                CompileTimeBinding::Symbol(_) => Err(format!("illegal use of syntax {s:?}")),
-                CompileTimeBinding::Macro(m) => self.apply_transformer(m, Ast::Syntax(s)), //_ => Err(format!("bad syntax non function call macro {}", s.0)),
+                Ast::Symbol(sym) if sym == self.variable => Ok(Ast::Syntax(s)),
+                Ast::Function(m) => self.apply_transformer(m, Ast::Syntax(s)), //_ => Err(format!("bad syntax non function call macro {}", s.0)),
+                _ => Err(format!("illegal use of syntax: {s:?}")),
             }
         }
     }
@@ -212,7 +215,7 @@ impl Expander<Binding> {
                 self.expand_app(*p, env)
             }
             Binding::Variable(binding) => match env.lookup(binding) {
-                Some(CompileTimeBinding::Macro(m)) => {
+                Some(Ast::Function(m)) => {
                     //println!("{binding} in {env:?}");
                     let apply_transformer = self.apply_transformer(m, Ast::Pair(Box::new(s)))?;
                     //println!("app {apply_transformer}");
@@ -273,7 +276,7 @@ impl Expander<Binding> {
             |term, base, env: Result<CompileTimeEnvoirnment, String>| match term {
                 Ast::Syntax(id) => {
                     let binding = self.add_local_binding(id);
-                    env.map(|env| env.extend(binding.clone(), CompileTimeBinding::Symbol(binding)))
+                    env.map(|env| env.extend(binding.clone(), Ast::Symbol(self.variable.clone())))
                 }
                 Ast::TheEmptyList if base => env,
                 _ => Err(format!(
@@ -347,21 +350,12 @@ impl Expander<Binding> {
         self.expand(body.clone().add_scope(sc), binders)
     }
 
-    pub(crate) fn eval_for_syntax_binding(
-        &mut self,
-        rhs: Ast,
-    ) -> Result<CompileTimeBinding, String> {
+    pub(crate) fn eval_for_syntax_binding(&mut self, rhs: Ast) -> Result<Ast, String> {
         // let var_name = format!("problem `evaluating` macro {rhs}");
         //println!("macro body {rhs}");
         let expand = self.expand(rhs, CompileTimeEnvoirnment::new())?;
         //println!("macro body {expand}");
-        self.eval_compiled(self.compile(expand)?).and_then(|e| {
-            if let Ast::Function(f) = e {
-                Ok(CompileTimeBinding::Macro(f))
-            } else {
-                Err(format!("{e} is not a macro"))
-            }
-        })
+        self.eval_compiled(self.compile(expand)?)
     }
 
     #[trace::trace()]
@@ -469,26 +463,20 @@ impl Expander<Binding> {
 }
 
 #[derive(Clone, Debug)]
-pub enum CompileTimeBinding {
-    Symbol(Symbol),
-    Macro(Function),
-}
-
-#[derive(Clone, Debug)]
-pub struct CompileTimeEnvoirnment(HashMap<Symbol, CompileTimeBinding>);
+pub struct CompileTimeEnvoirnment(HashMap<Symbol, Ast>);
 
 impl CompileTimeEnvoirnment {
     pub(crate) fn new() -> Self {
         Self(HashMap::new())
     }
 
-    pub(crate) fn extend(&self, key: Symbol, value: CompileTimeBinding) -> Self {
+    pub(crate) fn extend(&self, key: Symbol, value: Ast) -> Self {
         let mut map = self.0.clone();
         map.insert(key, value);
         Self(map)
     }
 
-    pub(crate) fn lookup(&self, key: &Symbol) -> Option<CompileTimeBinding> {
+    pub(crate) fn lookup(&self, key: &Symbol) -> Option<Ast> {
         self.0.get(key).cloned()
     }
 }
@@ -518,8 +506,9 @@ mod tests {
     use std::collections::{BTreeSet, HashSet};
 
     use crate::{
-        ast::{bound_identifier, AdjustScope, Ast, Scope, Symbol, Syntax},
-        expander::{CompileTimeBinding, CompileTimeEnvoirnment},
+        ast::{bound_identifier, AdjustScope, Ast, Function, Lambda, Scope, Symbol, Syntax},
+        evaluator::Env,
+        expander::CompileTimeEnvoirnment,
         UniqueNumberManager,
     };
 
@@ -927,7 +916,7 @@ mod tests {
             Binding::Variable(loc_a.clone()),
         );
         let env = CompileTimeEnvoirnment::new();
-        let env = env.extend(loc_a.clone(), CompileTimeBinding::Symbol("a".into()));
+        let env = env.extend(loc_a.clone(), Ast::Symbol(expander.variable));
         assert!(env.lookup(&loc_a).is_some());
     }
 
@@ -940,6 +929,290 @@ mod tests {
         assert_eq!(
             expander.resolve(&Syntax("d".into(), BTreeSet::from([sc1, sc2]))),
             Ok(&Binding::Variable(loc_d))
+        );
+    }
+
+    #[test]
+    fn expand_test_number() {
+        let mut expander = Expander::new();
+        assert_eq!(
+            expander.expand(
+                Ast::Number(1.0).datum_to_syntax(),
+                CompileTimeEnvoirnment::new()
+            ),
+            Ok(list!(
+                Ast::Syntax(Syntax(
+                    "quote".into(),
+                    BTreeSet::from([expander.core_scope])
+                )),
+                Ast::Number(1.0)
+            ))
+        );
+    }
+
+    #[test]
+    fn expand_test_lambda() {
+        let mut expander = Expander::new();
+        assert_eq!(
+            expander
+                .expand(
+                    list!(
+                        Ast::Symbol("lambda".into()),
+                        list!(Ast::Symbol("x".into())),
+                        Ast::Symbol("x".into())
+                    )
+                    .datum_to_syntax()
+                    .add_scope(expander.core_scope),
+                    CompileTimeEnvoirnment::new()
+                )
+                .map(Ast::syntax_to_datum),
+            Ok(list!(
+                Ast::Symbol("lambda".into()),
+                list!(Ast::Symbol("x".into())),
+                Ast::Symbol("x".into())
+            ))
+        );
+    }
+
+    #[test]
+    fn expand_test_primitive() {
+        let mut expander = Expander::new();
+        assert_eq!(
+            expander.expand(
+                Ast::Syntax(Syntax("cons".into(), BTreeSet::from([expander.core_scope]))),
+                CompileTimeEnvoirnment::new()
+            ),
+            Ok(Ast::Syntax(Syntax(
+                "cons".into(),
+                BTreeSet::from([expander.core_scope])
+            )))
+        );
+    }
+
+    #[test]
+    fn expand_test_basic_variable() {
+        let mut expander = Expander::new();
+        let loc_a = expander.scope_creator.gen_sym("a");
+        let sc1 = expander.scope_creator.new_scope();
+        expander.add_binding(
+            Syntax("a".into(), BTreeSet::from([sc1])),
+            Binding::Variable(loc_a.clone()),
+        );
+
+        assert_eq!(
+            expander.expand(
+                Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                CompileTimeEnvoirnment::new().extend(loc_a, Ast::Symbol(expander.variable.clone()))
+            ),
+            Ok(Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))))
+        );
+    }
+
+    #[test]
+    fn expand_test_free_variable() {
+        let mut expander = Expander::new();
+        let sc1 = expander.scope_creator.new_scope();
+        assert!(expander
+            .expand(
+                Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                CompileTimeEnvoirnment::new()
+            )
+            .is_err_and(|e| e.contains("free variable")));
+    }
+
+    #[test]
+    fn expand_test_basic_app() {
+        let mut expander = Expander::new();
+        let loc_a = expander.scope_creator.gen_sym("a");
+        let sc1 = expander.scope_creator.new_scope();
+        expander.add_binding(
+            Syntax("a".into(), BTreeSet::from([sc1])),
+            Binding::Variable(loc_a.clone()),
+        );
+        assert_eq!(
+            expander.expand(
+                list!(
+                    Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                    Ast::Number(1.0)
+                ),
+                CompileTimeEnvoirnment::new().extend(loc_a, Ast::Symbol(expander.variable.clone()))
+            ),
+            Ok(list!(
+                Ast::Syntax(Syntax("%app".into(), BTreeSet::from([expander.core_scope]))),
+                Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                list!(
+                    Ast::Syntax(Syntax(
+                        "quote".into(),
+                        BTreeSet::from([expander.core_scope])
+                    )),
+                    Ast::Number(1.)
+                )
+            ))
+        );
+    }
+    #[test]
+    fn expand_test_weird_but_works_app() {
+        let mut expander = Expander::new();
+        assert_eq!(
+            expander.expand(
+                list!(Ast::Number(0.), Ast::Number(1.)).datum_to_syntax(),
+                CompileTimeEnvoirnment::new()
+            ),
+            Ok(list!(
+                Ast::Syntax(Syntax("%app".into(), BTreeSet::from([expander.core_scope]))),
+                list!(
+                    Ast::Syntax(Syntax(
+                        "quote".into(),
+                        BTreeSet::from([expander.core_scope])
+                    )),
+                    Ast::Number(0.)
+                ),
+                list!(
+                    Ast::Syntax(Syntax(
+                        "quote".into(),
+                        BTreeSet::from([expander.core_scope])
+                    )),
+                    Ast::Number(1.)
+                )
+            ))
+        );
+    }
+
+    #[test]
+    fn expand_test_macro_basic() {
+        let mut expander = Expander::new();
+        let loc_a = expander.scope_creator.gen_sym("a");
+        let sc1 = expander.scope_creator.new_scope();
+        expander.add_binding(
+            Syntax("a".into(), BTreeSet::from([sc1])),
+            Binding::Variable(loc_a.clone()),
+        );
+        assert_eq!(
+            expander
+                .expand(
+                    Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                    CompileTimeEnvoirnment::new().extend(
+                        loc_a,
+                        Ast::Function(Function::Lambda(Lambda(
+                            Box::new(list!(Ast::Number(1.).datum_to_syntax())),
+                            Env::new(),
+                            Box::new(list!(Ast::Symbol("s".into())))
+                        )))
+                    )
+                )
+                .map(Ast::syntax_to_datum),
+            Ok(Ast::Number(1.))
+        );
+    }
+    #[test]
+    fn expand_test_macro_identity() {
+        let mut expander = Expander::new();
+        let loc_a = expander.scope_creator.gen_sym("a");
+        let sc1 = expander.scope_creator.new_scope();
+        expander.add_binding(
+            Syntax("a".into(), BTreeSet::from([sc1])),
+            Binding::Variable(loc_a.clone()),
+        );
+        assert_eq!(
+            expander
+                .expand(
+                    list!(
+                        Ast::Symbol("a".into()),
+                        list!(
+                            Ast::Symbol("lambda".into()),
+                            list!(Ast::Symbol("x".into())),
+                            Ast::Symbol("x".into())
+                        )
+                    )
+                    .datum_to_syntax()
+                    .add_scope(sc1)
+                    .add_scope(expander.core_scope),
+                    CompileTimeEnvoirnment::new().extend(
+                        loc_a,
+                        Ast::Function(Function::Lambda(Lambda(
+                            Box::new(list!(list!(
+                                Ast::Symbol("car".into()),
+                                list!(Ast::Symbol("cdr".into()), Ast::Symbol("s".into()))
+                            ))),
+                            Env::new_env(),
+                            Box::new(list!(Ast::Symbol("s".into())))
+                        )))
+                    )
+                )
+                .map(Ast::syntax_to_datum),
+            Ok(list!(
+                Ast::Symbol("lambda".into()),
+                list!(Ast::Symbol("x".into())),
+                Ast::Symbol("x".into())
+            ))
+        );
+    }
+
+    #[test]
+    fn apply_transformer_test() {
+        let mut expander = Expander::new();
+        let sc1 = expander.scope_creator.new_scope();
+        let transformed_s = expander
+            .apply_transformer(
+                Function::Lambda(Lambda(
+                    Box::new(list!(list!(
+                        Ast::Symbol("list".into()),
+                        list!(
+                            Ast::Symbol("car".into()),
+                            list!(Ast::Symbol("cdr".into()), Ast::Symbol("s".into()))
+                        ),
+                        Ast::Syntax(Syntax("x".into(), BTreeSet::new()))
+                    ))),
+                    Env::new_env(),
+                    Box::new(list!(Ast::Symbol("s".into()))),
+                )),
+                list!(
+                    Ast::Syntax(Syntax("m".into(), BTreeSet::new())),
+                    Ast::Syntax(Syntax("f".into(), BTreeSet::from([sc1])))
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            transformed_s.syntax_to_datum(),
+            list!(Ast::Symbol("f".into()), Ast::Symbol("x".into())),
+        );
+    }
+    #[test]
+    fn eval_for_syntax_test_number() {
+        let mut expander = Expander::new();
+        assert_eq!(
+            expander.eval_for_syntax_binding(
+                list!(
+                    Ast::Symbol("car".into()),
+                    list!(Ast::Symbol("list".into()), Ast::Number(1.), Ast::Number(2.))
+                )
+                .datum_to_syntax()
+                .add_scope(expander.core_scope)
+            ),
+            Ok(Ast::Number(1.))
+        );
+    }
+    #[test]
+    fn eval_for_syntax_test_symbol() {
+        let mut expander = Expander::new();
+        assert_eq!(
+            expander
+                .eval_for_syntax_binding(
+                    list!(
+                        Ast::Symbol("lambda".into()),
+                        list!(Ast::Symbol("x".into())),
+                        list!(Ast::Symbol("syntax-e".into()), Ast::Symbol("x".into())),
+                    )
+                    .datum_to_syntax()
+                    .add_scope(expander.core_scope)
+                )
+                .and_then(|f| {
+                    let Ast::Function(f) = f else {
+                        Err("not a function")?
+                    };
+                    f.apply(list!(Ast::Syntax(Syntax("x".into(), BTreeSet::new()))))
+                }),
+            Ok(Ast::Symbol("x".into()))
         );
     }
 }

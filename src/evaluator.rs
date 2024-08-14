@@ -226,7 +226,7 @@ impl Env {
         extend_envoirnment(new_envoirnment.clone(), params, args).map(|()| new_envoirnment)
     }
 
-    fn new() -> EnvRef {
+    pub(crate) fn new() -> EnvRef {
         let scope = HashMap::new();
         // TODO: primitive environment
         let parent = None;
