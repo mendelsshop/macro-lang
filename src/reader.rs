@@ -8,6 +8,9 @@ impl Reader {
     pub fn new() -> Self {
         Self(String::new())
     }
+    pub fn new_with_input(input: &impl ToString) -> Self {
+        Self(input.to_string())
+    }
 }
 
 #[derive(Debug)]
