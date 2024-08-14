@@ -1,6 +1,5 @@
 use crate::{
-    ast::{Ast, Function, Lambda, Pair, Symbol, Syntax},
-    DEPTH,
+    ast::{Ast, Function, Lambda, Pair, Symbol }, DEPTH
 };
 
 use trace::trace;
@@ -31,7 +30,7 @@ impl Env {
                         e.size()
                     ))?
                 };
-                Ok(e.datum_to_syntax())
+                Ok(e.datum_to_syntax(None))
             })),
         );
         env.borrow_mut().define(
@@ -61,13 +60,13 @@ impl Env {
                         e.size()
                     ))?
                 };
-                let Pair(Ast::Syntax(Syntax(e, _)), Ast::TheEmptyList) = *e else {
+                let Pair(Ast::Syntax(e), Ast::TheEmptyList) = *e else {
                     Err(format!(
                         "arity error: expected 1 argument, got {}",
                         e.size()
                     ))?
                 };
-                Ok(Ast::Symbol(e))
+                Ok(e.0)
             })),
         );
         env.borrow_mut().define(

@@ -4,56 +4,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::evaluator::{self, Env};
+use crate::{evaluator::{self, Env}, scope::Scope, syntax::Syntax};
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct Scope(pub usize);
 
-pub type ScopeSet = BTreeSet<Scope>;
 
-#[derive(Clone, PartialEq, Eq, Debug, Hash)]
-pub struct Syntax(pub Symbol, pub ScopeSet);
-
-pub trait AdjustScope: Sized {
-    fn adjust_scope(
-        self,
-        other_scope: Scope,
-        operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
-    ) -> Self;
-
-    fn add_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope, |mut scopes, other_scope| {
-            scopes.insert(other_scope);
-            scopes
-        })
-    }
-
-    fn flip_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope, |mut scopes, other_scope| {
-            if !scopes.remove(&other_scope) {
-                scopes.insert(other_scope);
-            }
-            scopes
-        })
-    }
-}
-
-impl Syntax {
-    #[must_use]
-    pub fn new(symbol: Symbol) -> Self {
-        Self(symbol, BTreeSet::new())
-    }
-}
-
-impl AdjustScope for Syntax {
-    fn adjust_scope(
-        self,
-        other_scope_set: Scope,
-        operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
-    ) -> Self {
-        Self(self.0, operation(self.1, other_scope_set))
-    }
-}
 
 pub type AnalyzedResult = Result<Box<dyn AnalyzeFn>, String>;
 
@@ -148,14 +102,20 @@ impl Pair {
 pub enum Ast {
     Pair(Box<Pair>),
     TheEmptyList,
-    Syntax(Syntax),
+    Syntax(Box<Syntax<Ast>>),
     Number(f64),
+    Boolean(bool),
     Symbol(Symbol),
     Function(Function),
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Symbol(pub Rc<str>, pub usize);
+impl From<&str> for Ast {
+    fn from(value: &str) -> Self {
+        Ast::Symbol(value.into())
+    }
+}
 
 impl fmt::Display for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -198,6 +158,7 @@ impl fmt::Display for Ast {
             Self::Number(n) => write!(f, "{n}"),
             Self::Symbol(s) => write!(f, "'{s}"),
             Self::Function(function) => write!(f, "{function}"),
+            Self::Boolean(b) => write!(f, "{b}"),
             Self::TheEmptyList => write!(f, "()"),
         }
     }
@@ -265,49 +226,24 @@ impl Ast {
             Ok(init),
         )
     }
+
+   pub fn is_keyword(&self) -> bool {
+        // https://docs.racket-lang.org/guide/keywords.html
+        false
+    }
+
+    // pub fn to_synax_list(self) -> Self {
+    //     match self {
+    //         Self::List(l) => Self::List(l.into_iter().map(Self::to_synax_list).collect()),
+    //         Self::Syntax(s) => s.0.to_synax_list(),
+    //         _ => self,
+    //     }
+    // }
     #[must_use]
     pub fn list(&self) -> bool {
         matches!(self,  Self::Pair(p) if p.list() ) || *self == Self::TheEmptyList
     }
 
-    #[must_use]
-    pub fn datum_to_syntax(self) -> Self {
-        match self {
-            Self::Symbol(s) => Self::Syntax(Syntax::new(s)),
-            Self::Pair(pair) => Self::Pair(Box::new(Pair(
-                pair.0.datum_to_syntax(),
-                pair.1.datum_to_syntax(),
-            ))),
-            _ => self,
-        }
-    }
-    pub(crate) fn syntax_to_datum(self) -> Self {
-        match self {
-            Self::Syntax(Syntax(s, _)) => Self::Symbol(s),
-            Self::Pair(pair) => Self::Pair(Box::new(Pair(
-                pair.0.syntax_to_datum(),
-                pair.1.syntax_to_datum(),
-            ))),
-            _ => self,
-        }
-    }
-    pub(crate) fn identifier(&self) -> bool {
-        matches!(self, Self::Syntax(_))
-    }
 }
 
-impl AdjustScope for Ast {
-    fn adjust_scope(
-        self,
-        other_scope: Scope,
-        operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
-    ) -> Self {
-        match self {
-            list if list.list() => list
-                .map(|x| Ok(x.adjust_scope(other_scope, operation)))
-                .unwrap_or(list),
-            Self::Syntax(s) => Self::Syntax(s.adjust_scope(other_scope, operation)),
-            _ => self,
-        }
-    }
-}
+

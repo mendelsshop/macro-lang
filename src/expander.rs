@@ -1,7 +1,5 @@
 use crate::{
-    ast::{AdjustScope, Ast, Function, Pair, Scope, Symbol, Syntax},
-    evaluator::{self, Env},
-    DEPTH,
+    ast::{ Ast, Function, Pair,  Symbol }, evaluator::{self, Env}, scope::{AdjustScope, Scope}, syntax::Syntax, DEPTH
 };
 
 use super::UniqueNumberManager;
@@ -53,7 +51,7 @@ impl From<Binding> for Symbol {
 
 #[derive(Debug)]
 pub struct Expander<T> {
-    pub(crate) all_bindings: HashMap<Syntax, T>,
+    pub(crate) all_bindings: HashMap<Syntax<Symbol>, T>,
     pub(crate) core_forms: BTreeSet<Binding>,
     pub(crate) core_primitives: BTreeSet<Binding>,
     pub(crate) core_scope: Scope,
@@ -162,7 +160,7 @@ impl Expander<Binding> {
             }
             Ast::Pair(l) => self.expand_app(*l, env),
             _ => Ok(Ast::Pair(Box::new(Pair(
-                Ast::Syntax(Syntax("quote".into(), BTreeSet::from([self.core_scope]))),
+                Ast::Syntax(Box::new(Syntax("quote".into(), BTreeSet::from([self.core_scope])))),
                 Ast::Pair(Box::new(Pair(s, Ast::TheEmptyList))),
             )))),
         }
@@ -182,7 +180,7 @@ impl Expander<Binding> {
             let Binding::Variable(binding) = binding else {
                 panic!()
             };
-            let v = env.lookup(binding).ok_or(format!("out of context {s:?}"))?;
+            let v = env.lookup(&binding).ok_or(format!("out of context {s:?}"))?;
             match v {
                 Ast::Symbol(sym) if sym == self.variable => Ok(Ast::Syntax(s)),
                 Ast::Function(m) => self.apply_transformer(m, Ast::Syntax(s)),
@@ -214,7 +212,7 @@ impl Expander<Binding> {
                 let Ast::Pair(p) = s.1 else { unreachable!() };
                 self.expand_app(*p, env)
             }
-            Binding::Variable(binding) => match env.lookup(binding) {
+            Binding::Variable(binding) => match env.lookup(&binding) {
                 Some(Ast::Function(m)) => {
                     //println!("{binding} in {env:?}");
                     let apply_transformer = self.apply_transformer(m, Ast::Pair(Box::new(s)))?;
@@ -241,7 +239,7 @@ impl Expander<Binding> {
         let Pair(rator, rands) = s;
 
         Ok(Ast::Pair(Box::new(Pair(
-            Ast::Syntax(Syntax("%app".into(), BTreeSet::from([self.core_scope]))),
+            Ast::Syntax(Box::new(Syntax("%app".into(), BTreeSet::from([self.core_scope])))),
             Ast::Pair(Box::new(Pair(
                 self.expand(rator, env.clone())?,
                 rands.map(|rand| self.expand(rand, env.clone()))?,
@@ -265,7 +263,7 @@ impl Expander<Binding> {
         let args = args.clone().map_pair(|term, base| match term {
             Ast::Syntax(id) => {
                 let id = id.add_scope(sc);
-                Ok(Ast::Syntax(id))
+                Ok(Ast::Syntax(Box::new(id)))
             }
             Ast::TheEmptyList if base => Ok(Ast::TheEmptyList),
             _ => Err(format!(
@@ -451,7 +449,7 @@ impl Expander<Binding> {
                     Err("bad syntax cannot play with core form")?
                 }
             }
-            Ast::Number(_) | Ast::Function(_) => Ok(rhs),
+            Ast::Number(_) |Ast::Boolean(_) | Ast::Function(_) => Ok(rhs),
             Ast::Symbol(_) | Ast::TheEmptyList => unreachable!(),
         }
     }
@@ -481,7 +479,6 @@ impl CompileTimeEnvoirnment {
     }
 }
 
-// TODO: return error if ambiguous
 // or maybe return error in resolve, instead of option
 pub fn check_unambiguous<'a>(
     id: &Syntax,
@@ -506,10 +503,7 @@ mod unit_tests {
     use std::collections::{BTreeSet, HashSet};
 
     use crate::{
-        ast::{bound_identifier, AdjustScope, Ast, Function, Lambda, Scope, Symbol, Syntax},
-        evaluator::Env,
-        expander::CompileTimeEnvoirnment,
-        UniqueNumberManager,
+        ast::{bound_identifier,  Ast, Function, Lambda,  Symbol }, evaluator::Env, expander::CompileTimeEnvoirnment, scope::{AdjustScope, Scope}, syntax::Syntax, UniqueNumberManager
     };
 
     use super::{check_unambiguous, Binding, Expander};
@@ -540,14 +534,14 @@ mod unit_tests {
     #[test]
     fn datum_to_syntax_with_identifier() {
         assert_eq!(
-            Ast::Symbol("a".into()).datum_to_syntax(),
+            Ast::Symbol("a".into()).datum_to_syntax(None),
             Ast::Syntax(Syntax("a".into(), BTreeSet::new()))
         );
     }
 
     #[test]
     fn datum_to_syntax_with_number() {
-        assert_eq!(Ast::Number(1.0).datum_to_syntax(), Ast::Number(1.0));
+        assert_eq!(Ast::Number(1.0).datum_to_syntax(None), Ast::Number(1.0));
     }
 
     #[test]
@@ -558,7 +552,7 @@ mod unit_tests {
                 Ast::Symbol(Symbol("b".into(), 0)),
                 Ast::Symbol(Symbol("c".into(), 0)),
             ]
-            .datum_to_syntax(),
+            .datum_to_syntax(None),
             list![
                 Ast::Syntax(Syntax("a".into(), BTreeSet::new())),
                 Ast::Syntax(Syntax("b".into(), BTreeSet::new())),
@@ -574,7 +568,7 @@ mod unit_tests {
                 Ast::Syntax(Syntax("b".into(), BTreeSet::new())),
                 Ast::Symbol(Symbol("c".into(), 0)),
             ]
-            .datum_to_syntax(),
+            .datum_to_syntax(None),
             list![
                 Ast::Syntax(Syntax("a".into(), BTreeSet::new())),
                 Ast::Syntax(Syntax("b".into(), BTreeSet::new())),
@@ -640,7 +634,7 @@ mod unit_tests {
                 Ast::Symbol(Symbol("x".into(), 0)),
                 Ast::Symbol(Symbol("y".into(), 0)),
             ]
-            .datum_to_syntax()
+            .datum_to_syntax(None)
             .add_scope(sc1),
             list![
                 Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1]))),
@@ -937,7 +931,7 @@ mod unit_tests {
         let mut expander = Expander::new();
         assert_eq!(
             expander.expand(
-                Ast::Number(1.0).datum_to_syntax(),
+                Ast::Number(1.0).datum_to_syntax(None),
                 CompileTimeEnvoirnment::new()
             ),
             Ok(list!(
@@ -961,7 +955,7 @@ mod unit_tests {
                         list!(Ast::Symbol("x".into())),
                         Ast::Symbol("x".into())
                     )
-                    .datum_to_syntax()
+                    .datum_to_syntax(None)
                     .add_scope(expander.core_scope),
                     CompileTimeEnvoirnment::new()
                 )
@@ -1055,7 +1049,7 @@ mod unit_tests {
         let mut expander = Expander::new();
         assert_eq!(
             expander.expand(
-                list!(Ast::Number(0.), Ast::Number(1.)).datum_to_syntax(),
+                list!(Ast::Number(0.), Ast::Number(1.)).datum_to_syntax(None),
                 CompileTimeEnvoirnment::new()
             ),
             Ok(list!(
@@ -1094,7 +1088,7 @@ mod unit_tests {
                     CompileTimeEnvoirnment::new().extend(
                         loc_a,
                         Ast::Function(Function::Lambda(Lambda(
-                            Box::new(list!(Ast::Number(1.).datum_to_syntax())),
+                            Box::new(list!(Ast::Number(1.).datum_to_syntax(None))),
                             Env::new(),
                             Box::new(list!(Ast::Symbol("s".into())))
                         )))
@@ -1124,7 +1118,7 @@ mod unit_tests {
                             Ast::Symbol("x".into())
                         )
                     )
-                    .datum_to_syntax()
+                    .datum_to_syntax(None)
                     .add_scope(sc1)
                     .add_scope(expander.core_scope),
                     CompileTimeEnvoirnment::new().extend(
@@ -1186,7 +1180,7 @@ mod unit_tests {
                     Ast::Symbol("car".into()),
                     list!(Ast::Symbol("list".into()), Ast::Number(1.), Ast::Number(2.))
                 )
-                .datum_to_syntax()
+                .datum_to_syntax(None)
                 .add_scope(expander.core_scope)
             ),
             Ok(Ast::Number(1.))
@@ -1203,7 +1197,7 @@ mod unit_tests {
                         list!(Ast::Symbol("x".into())),
                         list!(Ast::Symbol("syntax-e".into()), Ast::Symbol("x".into())),
                     )
-                    .datum_to_syntax()
+                    .datum_to_syntax(None)
                     .add_scope(expander.core_scope)
                 )
                 .and_then(|f| {
@@ -1228,7 +1222,7 @@ mod tests {
     impl Expander<Binding> {
         fn expand_expression(&mut self, e: Ast) -> Result<Ast, String> {
             self.expand(
-                self.namespace_syntax_introduce(e.datum_to_syntax()),
+                self.namespace_syntax_introduce(e.datum_to_syntax(None)),
                 CompileTimeEnvoirnment::new(),
             )
         }
@@ -1370,7 +1364,7 @@ mod tests {
         );
         assert!(expander
             .expand(
-                expander.namespace_syntax_introduce(reader.read().unwrap().datum_to_syntax()),
+                expander.namespace_syntax_introduce(reader.read().unwrap().datum_to_syntax(None)),
                 CompileTimeEnvoirnment::new()
             )
             .is_err_and(|e| e.contains("illegal use of syntax")))
