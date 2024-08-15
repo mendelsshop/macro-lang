@@ -380,7 +380,7 @@ fn main() {
                 expander.expand(
                     expander.namespace_syntax_introduce(ast.datum_to_syntax(None)),
                     expander.introduce(ast.datum_to_syntax(None)),
-                    CompileTimeEnvoirnment::new(),
+                    CompileTimeEnvoirnment::new()
                 )
             })
             .inspect(|e| println!("after expansion: {e}"))

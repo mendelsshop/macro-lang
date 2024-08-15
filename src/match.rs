@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap};
 
-use crate::{Ast, Symbol};
+use itertools::Itertools;
+
+use crate::{ast::Pair, Ast, Symbol};
 
 // sum of the folds might be/probably are supposed to be smoosh hash hash1 by putting all the
 //  concantinating the values of all a in hash and hash1 into new hashmap
@@ -9,9 +11,11 @@ pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Op
     fn r#match(
         s: Ast,
         pattern: Ast,
-        original_pattern: &Ast,
+        original_s: &Ast,
+        // HashMap of vec no worky b/c it only vec if matching ...+/...
+        // Need better way to smush ...+/... without replacement
     ) -> Result<HashMap<Symbol, Ast>, String> {
-        // TODO: make sure pattern mathches ^id(:|$)
+        // TODO: make sure pattern mathches ^id
         if let Ast::Symbol(pattern) = pattern {
             if (pattern.0.starts_with("id") || pattern.0.starts_with("id:")) && !s.identifier() {
                 Err(format!("not an identifier {s}"))
@@ -19,79 +23,98 @@ pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Op
                 Ok(HashMap::from([(pattern, s)]))
             }
         } else if let Ast::Syntax(s) = s {
-            r#match(s.0, pattern, original_pattern)
-        } else if let Ast::List(pattern) = pattern {
-            match (pattern.as_slice(), s) {
-                ([fst, Ast::Symbol(Symbol(str, _))], s) if ["...", "...+"].contains(&&**str) => {
+            r#match(s.0, pattern, original_s)
+        } else if let Ast::Pair(pattern) = pattern {
+            match (*pattern.clone(), s) {
+                (Pair(fst, Ast::Pair(second)), s) if matches!(&second.0, Ast::Symbol(Symbol(str,_ )) if ["...", "...+"].contains(&&**str)) =>
+                {
+                    let Ast::Symbol(Symbol(str, _)) = second.0 else {
+                        panic!()
+                    };
                     let flat_s = s.clone().to_synax_list();
                     match flat_s {
                         // null s
-                        Ast::List(flat_s) if flat_s.len() == 0 && **str == *"...+" => {
-                            Ok(make_empty_vars(Ast::List(pattern)))
+                        Ast::TheEmptyList if *str == *"..." => {
+                            Ok(make_empty_vars(Ast::Pair(pattern)))
                         }
+                        Ast::TheEmptyList if *str == *"...+" => Err(format!(
+                            "bad syntax {original_s}, expected one or more {fst}"
+                        )),
                         // pair s
-                        Ast::List(flat_s) if flat_s.len() != 0 => flat_s
-                            .into_iter()
-                            .map(|s| r#match(s, fst.clone(), original_pattern))
-                            .try_fold(HashMap::new(), |mut hash, resulut| {
-                                resulut.map(|hash1| {
-                                    hash.extend(hash1);
-                                    hash
-                                })
-                            }),
+                        _ if flat_s.list() => Ok((flat_s
+                            .foldl(
+                                |s, vars: Result<Vec<HashMap<Symbol, Ast>>, String>| {
+                                    vars.and_then(|mut vars| {
+                                        r#match(s, fst.clone(), original_s).map(|s| {
+                                            vars.push(s);
+                                            vars
+                                        })
+                                    })
+                                },
+                                Ok(vec![]),
+                            )?)?
+                        .into_iter()
+                        .flatten()
+                        .chunk_by(|vars| vars.0.clone())
+                        .into_iter()
+                        .map(|(s, matches)| {
+                            (
+                                s,
+                                matches.fold(Ast::TheEmptyList, |list, current| {
+                                    Ast::Pair(Box::new(Pair(current.1, list)))
+                                }),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>()),
                         _ => {
                             // Error
-                            Err(format!("bad syntax {original_pattern}"))
+                            Err(format!("bad syntax {original_s}"))
                         }
                     }
                 }
-                // null s, p
-                (_, Ast::List(s)) if s.len() == 0 && pattern.len() == 0 => Ok(HashMap::new()),
                 // pair s, p
                 // i think len s = len p
-                (_, Ast::List(s)) if s.len() == pattern.len() => s
-                    .into_iter()
-                    .zip(pattern.into_iter())
-                    .map(|(s, pattern)| r#match(s, pattern, original_pattern))
-                    .try_fold(HashMap::new(), |mut hash, resulut| {
-                        resulut.map(|hash1| {
-                            hash.extend(hash1);
-                            hash
+                (Pair(p1, p2), Ast::Pair(s)) => {
+                    r#match(s.0.clone(), p1, original_s).and_then(|mut vars| {
+                        r#match(s.1, p2, original_s).map(|vars_cdr| {
+                            vars.extend(vars_cdr);
+                            vars
                         })
-                    }),
+                    })
+                }
                 _ => {
                     // Error
-                    Err(format!("bad syntax {original_pattern}"))
+                    Err(format!("bad syntax {original_s}"))
                 }
             }
+            // null s, p
+        } else if matches!(pattern, Ast::TheEmptyList) {
+            Ok(HashMap::new())
         } else if matches!(pattern, Ast::Boolean(_)) || pattern.is_keyword() && pattern == s {
             Ok(HashMap::new())
         } else {
             // Error
-            Err(format!("bad syntax {original_pattern}"))
+            Err(format!("bad syntax {original_s}"))
         }
     }
-    let symbol_map = r#match(original, pattern.clone(), &pattern.clone())?;
+    let symbol_map = r#match(original.clone(), pattern, &original)?;
     Ok(move |symbol| symbol_map.get(&symbol).cloned())
 }
 
 fn make_empty_vars(pattern: Ast) -> HashMap<Symbol, Ast> {
     match pattern {
-        Ast::List(l) if matches!(&l[..],  [_, Ast::Symbol(Symbol(str, _))] if ["...", "...+"].contains(&&**str)) =>
+        Ast::Pair(first) if matches!(&first.1, Ast::Pair(second) if matches!(&second.0, Ast::Symbol(Symbol(str,_ )) if ["...", "...+"].contains(&&**str))) =>
         {
-            let fst = l[0].clone();
+            let fst = first.0;
             make_empty_vars(fst)
         }
-        Ast::List(l) => {
-            l.into_iter()
-                .map(make_empty_vars)
-                .fold(HashMap::new(), |mut hash, hash1| {
-                    hash.extend(hash1);
-                    hash
-                })
+        Ast::Pair(p) => {
+            let mut vars = make_empty_vars(p.0);
+            vars.extend(make_empty_vars(p.1));
+            vars
         }
         // return hashmap of the symbol and null
-        Ast::Symbol(s) => HashMap::from([(s, Ast::List(vec![]))]),
+        Ast::Symbol(s) => HashMap::from([(s, Ast::TheEmptyList)]),
         _ => HashMap::new(),
     }
 }
@@ -103,4 +126,13 @@ pub fn try_match_syntax(
     pattern: Ast,
 ) -> Result<impl Fn(Symbol) -> Option<Ast>, String> {
     match_syntax(original, pattern)
+}
+impl Ast {
+    pub fn to_synax_list(self) -> Self {
+        match self {
+            Self::Pair(l) => Self::Pair(Box::new(Pair(l.0, l.1.to_synax_list()))),
+            Self::Syntax(s) => s.0.to_synax_list(),
+            _ => self,
+        }
+    }
 }

@@ -1,5 +1,9 @@
 use crate::{
-    ast::{ Ast, Function, Pair,  Symbol }, evaluator::{self, Env}, scope::{AdjustScope, Scope}, syntax::Syntax, DEPTH
+    ast::{Ast, Function, Pair, Symbol},
+    evaluator::{self, Env},
+    scope::{AdjustScope, Scope},
+    syntax::Syntax,
+    DEPTH,
 };
 
 use super::UniqueNumberManager;
@@ -160,7 +164,10 @@ impl Expander<Binding> {
             }
             Ast::Pair(l) => self.expand_app(*l, env),
             _ => Ok(Ast::Pair(Box::new(Pair(
-                Ast::Syntax(Box::new(Syntax("quote".into(), BTreeSet::from([self.core_scope])))),
+                Ast::Syntax(Box::new(Syntax(
+                    "quote".into(),
+                    BTreeSet::from([self.core_scope]),
+                ))),
                 Ast::Pair(Box::new(Pair(s, Ast::TheEmptyList))),
             )))),
         }
@@ -180,7 +187,9 @@ impl Expander<Binding> {
             let Binding::Variable(binding) = binding else {
                 panic!()
             };
-            let v = env.lookup(&binding).ok_or(format!("out of context {s:?}"))?;
+            let v = env
+                .lookup(&binding)
+                .ok_or(format!("out of context {s:?}"))?;
             match v {
                 Ast::Symbol(sym) if sym == self.variable => Ok(Ast::Syntax(s)),
                 Ast::Function(m) => self.apply_transformer(m, Ast::Syntax(s)),
@@ -239,7 +248,10 @@ impl Expander<Binding> {
         let Pair(rator, rands) = s;
 
         Ok(Ast::Pair(Box::new(Pair(
-            Ast::Syntax(Box::new(Syntax("%app".into(), BTreeSet::from([self.core_scope])))),
+            Ast::Syntax(Box::new(Syntax(
+                "%app".into(),
+                BTreeSet::from([self.core_scope]),
+            ))),
             Ast::Pair(Box::new(Pair(
                 self.expand(rator, env.clone())?,
                 rands.map(|rand| self.expand(rand, env.clone()))?,
@@ -449,7 +461,7 @@ impl Expander<Binding> {
                     Err("bad syntax cannot play with core form")?
                 }
             }
-            Ast::Number(_) |Ast::Boolean(_) | Ast::Function(_) => Ok(rhs),
+            Ast::Number(_) | Ast::Boolean(_) | Ast::Function(_) => Ok(rhs),
             Ast::Symbol(_) | Ast::TheEmptyList => unreachable!(),
         }
     }
@@ -503,7 +515,12 @@ mod unit_tests {
     use std::collections::{BTreeSet, HashSet};
 
     use crate::{
-        ast::{bound_identifier,  Ast, Function, Lambda,  Symbol }, evaluator::Env, expander::CompileTimeEnvoirnment, scope::{AdjustScope, Scope}, syntax::Syntax, UniqueNumberManager
+        ast::{bound_identifier, Ast, Function, Lambda, Symbol},
+        evaluator::Env,
+        expander::CompileTimeEnvoirnment,
+        scope::{AdjustScope, Scope},
+        syntax::Syntax,
+        UniqueNumberManager,
     };
 
     use super::{check_unambiguous, Binding, Expander};
@@ -512,22 +529,22 @@ mod unit_tests {
     fn bound_identifier_same() {
         list!(Ast::Symbol("a".into()), Ast::Symbol("b".into()));
         assert!(bound_identifier(
-            Ast::Syntax(Syntax("a".into(), BTreeSet::from([Scope(0)]))),
-            Ast::Syntax(Syntax("a".into(), BTreeSet::from([Scope(0)])))
+            Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([Scope(0)])))),
+            Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([Scope(0)]))))
         ));
     }
     #[test]
     fn bound_identifier_different_symbol() {
         assert!(!bound_identifier(
-            Ast::Syntax(Syntax("a".into(), BTreeSet::from([Scope(0)]))),
-            Ast::Syntax(Syntax("b".into(), BTreeSet::from([Scope(0)])))
+            Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([Scope(0)])))),
+            Ast::Syntax(Box::new(Syntax("b".into(), BTreeSet::from([Scope(0)]))))
         ));
     }
     #[test]
     fn bound_identifier_different_scope() {
         assert!(!bound_identifier(
-            Ast::Syntax(Syntax("a".into(), BTreeSet::from([Scope(0)]))),
-            Ast::Syntax(Syntax("a".into(), BTreeSet::from([Scope(1)])))
+            Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([Scope(0)])))),
+            Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([Scope(1)]))))
         ));
     }
 
@@ -535,7 +552,7 @@ mod unit_tests {
     fn datum_to_syntax_with_identifier() {
         assert_eq!(
             Ast::Symbol("a".into()).datum_to_syntax(None),
-            Ast::Syntax(Syntax("a".into(), BTreeSet::new()))
+            Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::new())))
         );
     }
 
@@ -554,9 +571,9 @@ mod unit_tests {
             ]
             .datum_to_syntax(None),
             list![
-                Ast::Syntax(Syntax("a".into(), BTreeSet::new())),
-                Ast::Syntax(Syntax("b".into(), BTreeSet::new())),
-                Ast::Syntax(Syntax("c".into(), BTreeSet::new())),
+                Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::new()))),
+                Ast::Syntax(Box::new(Syntax("b".into(), BTreeSet::new()))),
+                Ast::Syntax(Box::new(Syntax("c".into(), BTreeSet::new()))),
             ]
         );
     }
@@ -565,14 +582,14 @@ mod unit_tests {
         assert_eq!(
             list![
                 Ast::Symbol(Symbol("a".into(), 0)),
-                Ast::Syntax(Syntax("b".into(), BTreeSet::new())),
+                Ast::Syntax(Box::new(Syntax("b".into(), BTreeSet::new()))),
                 Ast::Symbol(Symbol("c".into(), 0)),
             ]
             .datum_to_syntax(None),
             list![
-                Ast::Syntax(Syntax("a".into(), BTreeSet::new())),
-                Ast::Syntax(Syntax("b".into(), BTreeSet::new())),
-                Ast::Syntax(Syntax("c".into(), BTreeSet::new())),
+                Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::new()))),
+                Ast::Syntax(Box::new(Syntax("b".into(), BTreeSet::new()))),
+                Ast::Syntax(Box::new(Syntax("c".into(), BTreeSet::new()))),
             ]
         );
     }
@@ -580,7 +597,7 @@ mod unit_tests {
     #[test]
     fn syntax_to_datum_with_identifier() {
         assert_eq!(
-            Ast::Syntax(Syntax("a".into(), BTreeSet::new())).syntax_to_datum(),
+            Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::new()))).syntax_to_datum(),
             Ast::Symbol(Symbol("a".into(), 0)),
         );
     }
@@ -594,9 +611,9 @@ mod unit_tests {
     fn syntax_to_datum_with_list() {
         assert_eq!(
             list![
-                Ast::Syntax(Syntax("a".into(), BTreeSet::new())),
-                Ast::Syntax(Syntax("b".into(), BTreeSet::new())),
-                Ast::Syntax(Syntax("c".into(), BTreeSet::new())),
+                Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::new()))),
+                Ast::Syntax(Box::new(Syntax("b".into(), BTreeSet::new()))),
+                Ast::Syntax(Box::new(Syntax("c".into(), BTreeSet::new()))),
             ]
             .syntax_to_datum(),
             list![
@@ -620,8 +637,8 @@ mod unit_tests {
         let mut scope_creator = UniqueNumberManager::new();
         let sc1 = scope_creator.new_scope();
         assert_eq!(
-            Ast::Syntax(Syntax("x".into(), BTreeSet::new())).add_scope(sc1),
-            Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1])))
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::new()))).add_scope(sc1),
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1]))))
         );
     }
 
@@ -637,8 +654,8 @@ mod unit_tests {
             .datum_to_syntax(None)
             .add_scope(sc1),
             list![
-                Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1]))),
-                Ast::Syntax(Syntax("y".into(), BTreeSet::from([sc1]))),
+                Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1])))),
+                Ast::Syntax(Box::new(Syntax("y".into(), BTreeSet::from([sc1])))),
             ]
         );
     }
@@ -649,8 +666,8 @@ mod unit_tests {
         let sc1 = scope_creator.new_scope();
         let sc2 = scope_creator.new_scope();
         assert_eq!(
-            Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1]))).add_scope(sc2),
-            Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1, sc2])))
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1])))).add_scope(sc2),
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1, sc2]))))
         );
     }
 
@@ -659,8 +676,8 @@ mod unit_tests {
         let mut scope_creator = UniqueNumberManager::new();
         let sc1 = scope_creator.new_scope();
         assert_eq!(
-            Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1]))).add_scope(sc1),
-            Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1,])))
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1])))).add_scope(sc1),
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1,]))))
         );
     }
 
@@ -670,8 +687,8 @@ mod unit_tests {
         let sc1 = scope_creator.new_scope();
         let sc2 = scope_creator.new_scope();
         assert_eq!(
-            Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1]))).flip_scope(sc2),
-            Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1, sc2])))
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1])))).flip_scope(sc2),
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1, sc2]))))
         );
     }
 
@@ -681,8 +698,8 @@ mod unit_tests {
         let sc1 = scope_creator.new_scope();
         let sc2 = scope_creator.new_scope();
         assert_eq!(
-            Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1, sc2]))).flip_scope(sc2),
-            Ast::Syntax(Syntax("x".into(), BTreeSet::from([sc1,])))
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1, sc2])))).flip_scope(sc2),
+            Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::from([sc1,]))))
         );
     }
     #[test]
@@ -848,8 +865,8 @@ mod unit_tests {
         let sc2 = expander.scope_creator.new_scope();
         expander.add_binding(Syntax("a".into(), BTreeSet::from([sc1])), loc_a);
         assert!(expander.free_identifier(
-            Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
-            Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1, sc2])))
+            Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([sc1])))),
+            Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([sc1, sc2]))))
         ));
     }
     #[test]
@@ -862,8 +879,8 @@ mod unit_tests {
         expander.add_binding(Syntax("b".into(), BTreeSet::from([sc1])), loc_b_out);
         expander.add_binding(Syntax("b".into(), BTreeSet::from([sc1, sc2])), loc_b_in);
         assert!(!expander.free_identifier(
-            Ast::Syntax(Syntax("b".into(), BTreeSet::from([sc1]))),
-            Ast::Syntax(Syntax("b".into(), BTreeSet::from([sc1, sc2])))
+            Ast::Syntax(Box::new(Syntax("b".into(), BTreeSet::from([sc1])))),
+            Ast::Syntax(Box::new(Syntax("b".into(), BTreeSet::from([sc1, sc2]))))
         ));
     }
 
@@ -935,10 +952,10 @@ mod unit_tests {
                 CompileTimeEnvoirnment::new()
             ),
             Ok(list!(
-                Ast::Syntax(Syntax(
+                Ast::Syntax(Box::new(Syntax(
                     "quote".into(),
                     BTreeSet::from([expander.core_scope])
-                )),
+                ))),
                 Ast::Number(1.0)
             ))
         );
@@ -973,13 +990,16 @@ mod unit_tests {
         let mut expander = Expander::new();
         assert_eq!(
             expander.expand(
-                Ast::Syntax(Syntax("cons".into(), BTreeSet::from([expander.core_scope]))),
+                Ast::Syntax(Box::new(Syntax(
+                    "cons".into(),
+                    BTreeSet::from([expander.core_scope])
+                ))),
                 CompileTimeEnvoirnment::new()
             ),
-            Ok(Ast::Syntax(Syntax(
+            Ok(Ast::Syntax(Box::new(Syntax(
                 "cons".into(),
                 BTreeSet::from([expander.core_scope])
-            )))
+            ))))
         );
     }
 
@@ -995,10 +1015,13 @@ mod unit_tests {
 
         assert_eq!(
             expander.expand(
-                Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([sc1])))),
                 CompileTimeEnvoirnment::new().extend(loc_a, Ast::Symbol(expander.variable.clone()))
             ),
-            Ok(Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))))
+            Ok(Ast::Syntax(Box::new(Syntax(
+                "a".into(),
+                BTreeSet::from([sc1])
+            ))))
         );
     }
 
@@ -1008,7 +1031,7 @@ mod unit_tests {
         let sc1 = expander.scope_creator.new_scope();
         assert!(expander
             .expand(
-                Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([sc1])))),
                 CompileTimeEnvoirnment::new()
             )
             .is_err_and(|e| e.contains("free variable")));
@@ -1026,19 +1049,22 @@ mod unit_tests {
         assert_eq!(
             expander.expand(
                 list!(
-                    Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                    Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([sc1])))),
                     Ast::Number(1.0)
                 ),
                 CompileTimeEnvoirnment::new().extend(loc_a, Ast::Symbol(expander.variable.clone()))
             ),
             Ok(list!(
-                Ast::Syntax(Syntax("%app".into(), BTreeSet::from([expander.core_scope]))),
-                Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                Ast::Syntax(Box::new(Syntax(
+                    "%app".into(),
+                    BTreeSet::from([expander.core_scope])
+                ))),
+                Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([sc1])))),
                 list!(
-                    Ast::Syntax(Syntax(
+                    Ast::Syntax(Box::new(Syntax(
                         "quote".into(),
                         BTreeSet::from([expander.core_scope])
-                    )),
+                    ))),
                     Ast::Number(1.)
                 )
             ))
@@ -1053,19 +1079,22 @@ mod unit_tests {
                 CompileTimeEnvoirnment::new()
             ),
             Ok(list!(
-                Ast::Syntax(Syntax("%app".into(), BTreeSet::from([expander.core_scope]))),
+                Ast::Syntax(Box::new(Syntax(
+                    "%app".into(),
+                    BTreeSet::from([expander.core_scope])
+                ))),
                 list!(
-                    Ast::Syntax(Syntax(
+                    Ast::Syntax(Box::new(Syntax(
                         "quote".into(),
                         BTreeSet::from([expander.core_scope])
-                    )),
+                    ))),
                     Ast::Number(0.)
                 ),
                 list!(
-                    Ast::Syntax(Syntax(
+                    Ast::Syntax(Box::new(Syntax(
                         "quote".into(),
                         BTreeSet::from([expander.core_scope])
-                    )),
+                    ))),
                     Ast::Number(1.)
                 )
             ))
@@ -1084,7 +1113,7 @@ mod unit_tests {
         assert_eq!(
             expander
                 .expand(
-                    Ast::Syntax(Syntax("a".into(), BTreeSet::from([sc1]))),
+                    Ast::Syntax(Box::new(Syntax("a".into(), BTreeSet::from([sc1])))),
                     CompileTimeEnvoirnment::new().extend(
                         loc_a,
                         Ast::Function(Function::Lambda(Lambda(
@@ -1155,14 +1184,14 @@ mod unit_tests {
                             Ast::Symbol("car".into()),
                             list!(Ast::Symbol("cdr".into()), Ast::Symbol("s".into()))
                         ),
-                        Ast::Syntax(Syntax("x".into(), BTreeSet::new()))
+                        Ast::Syntax(Box::new(Syntax("x".into(), BTreeSet::new())))
                     ))),
                     Env::new_env(),
                     Box::new(list!(Ast::Symbol("s".into()))),
                 )),
                 list!(
-                    Ast::Syntax(Syntax("m".into(), BTreeSet::new())),
-                    Ast::Syntax(Syntax("f".into(), BTreeSet::from([sc1])))
+                    Ast::Syntax(Box::new(Syntax("m".into(), BTreeSet::new()))),
+                    Ast::Syntax(Box::new(Syntax("f".into(), BTreeSet::from([sc1]))))
                 ),
             )
             .unwrap();
@@ -1204,7 +1233,10 @@ mod unit_tests {
                     let Ast::Function(f) = f else {
                         Err("not a function")?
                     };
-                    f.apply(list!(Ast::Syntax(Syntax("x".into(), BTreeSet::new()))))
+                    f.apply(list!(Ast::Syntax(Box::new(Syntax(
+                        "x".into(),
+                        BTreeSet::new()
+                    )))))
                 }),
             Ok(Ast::Symbol("x".into()))
         );
