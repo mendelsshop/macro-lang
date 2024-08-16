@@ -13,6 +13,7 @@ mod ast;
 mod evaluator;
 mod expander;
 mod reader;
+mod expand_expr;
 use binding::{Binding, CoreForm};
 use scope::{AdjustScope, Scope};
 use std::{
@@ -129,7 +130,8 @@ impl Expander {
             core_primitives,
             core_forms,
             all_bindings: HashMap::new(),
-            env: Env::new_env(),
+            run_time_env: Env::new_env(),
+            expand_env: Env::new_env(),
         };
         this.core_forms
             .clone()

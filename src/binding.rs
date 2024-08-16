@@ -36,7 +36,7 @@ pub enum CompileTimeBinding {
 }
 pub type CoreForm = fn(&mut Expander, Ast, CompileTimeEnvoirnment) -> Result<Ast, String>;
 #[derive(Clone)]
-pub struct CompileTimeEnvoirnment(HashMap<Symbol, Ast>);
+pub struct CompileTimeEnvoirnment(pub(crate) HashMap<Symbol, Ast>);
 
 impl CompileTimeEnvoirnment {
     pub fn new() -> Self {

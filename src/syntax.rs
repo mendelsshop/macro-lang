@@ -21,6 +21,17 @@ impl TryFrom<Ast> for Syntax<Symbol> {
 const EMPTY_SCOPE: BTreeSet<Scope> = ScopeSet::new();
 const EMPTY_SYNTAX: Syntax<Ast> = Syntax(Ast::Boolean(false), EMPTY_SCOPE);
 
+impl TryFrom<Syntax<Ast>> for Syntax<Symbol> {
+    type Error = String;
+
+    fn try_from(value: Syntax<Ast>) -> Result<Self, Self::Error> {
+        if let Ast::Symbol(s) = value.0 {
+            Ok(Self(s, value.1))
+        } else {
+            Err(format!("{value:?} is not a symbol"))
+        }
+    }
+}
 impl Ast {
     #[must_use]
     pub fn datum_to_syntax(self, scopes: Option<ScopeSet>) -> Self {
