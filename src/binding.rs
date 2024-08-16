@@ -55,10 +55,10 @@ impl CompileTimeEnvoirnment {
         // TODO: maybe core form can get their own type
         core_forms: HashMap<Rc<str>, CoreForm>,
         variable: Symbol,
-    ) -> Option<CompileTimeBinding> {
+    ) -> Result<CompileTimeBinding, String> {
         match key {
-            Binding::Variable(key) => self.0.get(key).cloned().map(CompileTimeBinding::Regular),
-            Binding::CoreBinding(core) => Some(
+            Binding::Variable(key) => self.0.get(key).cloned().map(CompileTimeBinding::Regular).ok_or(format!("identifier used out of context: {key}")),
+            Binding::CoreBinding(core) => Ok(
                 core_forms
                     .get(core)
                     .map(|f| CompileTimeBinding::CoreForm(f.clone()))

@@ -92,6 +92,7 @@ pub struct Expander {
     all_bindings: HashMap<Syntax<Symbol>, Binding>,
     env: EnvRef,
     core_syntax: Syntax<Ast>,
+    pub(crate) variable: Symbol,
 }
 
 impl Default for Expander {
@@ -349,6 +350,7 @@ impl Expander {
 
         Ok(transformed_s.flip_scope(intro_scope))
     }
+
 }
 
 fn main() {
