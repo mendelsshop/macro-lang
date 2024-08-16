@@ -1,5 +1,6 @@
 use crate::{
-    ast::Pair, binding::Binding, list, r#match::match_syntax, syntax::Syntax, Ast, Expander, Symbol,
+    ast::Pair, binding::Binding, evaluator::Evaluator, list, r#match::match_syntax, syntax::Syntax,
+    Ast, Expander, Symbol,
 };
 
 impl Expander {
@@ -83,6 +84,13 @@ impl Expander {
             return Err(format!("bad binding {b}"));
         };
         Ok(key_to_symbol(s.clone()))
+    }
+
+    pub fn expand_time_eval(&self, compiled: Ast) -> Result<Ast, String> {
+        Evaluator::eval(compiled, self.expand_env.clone())
+    }
+    pub fn run_time_eval(&self, compiled: Ast) -> Result<Ast, String> {
+        Evaluator::eval(compiled, self.run_time_env.clone())
     }
 }
 

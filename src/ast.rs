@@ -244,4 +244,11 @@ impl Ast {
     pub fn list(&self) -> bool {
         matches!(self,  Self::Pair(p) if p.list() ) || *self == Self::TheEmptyList
     }
+
+    pub(crate) fn scope_set(&self) -> Option<BTreeSet<Scope>> {
+        match self {
+            Ast::Syntax(s) => Some(s.1.clone()),
+            _ => None,
+        }
+    }
 }

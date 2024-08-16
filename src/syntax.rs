@@ -1,8 +1,7 @@
 use std::{collections::BTreeSet, fmt::Debug};
 
-use crate::{ast::Pair, Ast, Scope, Symbol};
+use crate::{ast::Pair, scope::ScopeSet, Ast, Scope, Symbol};
 
-type ScopeSet = BTreeSet<Scope>;
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub struct Syntax<T: Clone + PartialEq + Debug>(pub T, pub ScopeSet);
 impl TryFrom<Ast> for Syntax<Symbol> {

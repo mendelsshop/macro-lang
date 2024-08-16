@@ -90,7 +90,8 @@ pub struct Expander {
     core_scope: Scope,
     scope_creator: UniqueNumberManager,
     all_bindings: HashMap<Syntax<Symbol>, Binding>,
-    env: EnvRef,
+    run_time_env: EnvRef,
+    expand_env: EnvRef,
     core_syntax: Syntax<Ast>,
     pub(crate) variable: Symbol,
 }
