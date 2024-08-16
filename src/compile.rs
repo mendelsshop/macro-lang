@@ -1,5 +1,5 @@
 use crate::{
-    binding::Binding, list, r#match::match_syntax, syntax::Syntax, Ast, Expander, Function, Symbol,
+    ast::Pair, binding::Binding, list, r#match::match_syntax, syntax::Syntax, Ast, Expander, Symbol,
 };
 
 impl Expander {
@@ -30,9 +30,28 @@ impl Expander {
                             self.compile(body)?
                         ))
                     }
-                    "#%app" => todo!(),
-                    "quote" => todo!(),
-                    "quote-syntax" => todo!(),
+                    "#%app" => {
+                        let m = match_syntax(
+                            s,
+                            Ast::Pair(Box::new(Pair("%app".into(), "rest".into()))),
+                        )?;
+                        m("id".into())
+                            .ok_or("internal error")?
+                            .map(|s| self.compile(s))
+                    }
+                    "quote" => {
+                        let m = match_syntax(s, list!("quote".into(), "datum".into()))?;
+                        m("datum".into())
+                            .ok_or("internal error".to_string())
+                            .map(Ast::syntax_to_datum)
+                            .map(|datum| list!("quote".into(), datum))
+                    }
+                    "quote-syntax" => {
+                        let m = match_syntax(s, list!("quote-syntax".into(), "datum".into()))?;
+                        m("datum".into())
+                            .ok_or("internal error".to_string())
+                            .map(|datum| list!("quote".into(), datum))
+                    }
                     _ => Err(format!("unrecognized core form {core_sym}")),
                 }
             }
