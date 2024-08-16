@@ -3,7 +3,7 @@
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
 use std::io::{BufRead, BufReader, Write};
 
-use ast::{ Ast, Function,  Symbol};
+use ast::{Ast, Function, Symbol};
 use evaluator::{Env, EnvRef, Evaluator};
 use expander::CompileTimeEnvoirnment;
 
@@ -351,14 +351,6 @@ impl Expander {
     }
 }
 
-
-
-
-
-
-
-
-
 fn main() {
     let mut reader = reader::Reader::new();
     let newline = || {
@@ -380,7 +372,7 @@ fn main() {
                 expander.expand(
                     expander.namespace_syntax_introduce(ast.datum_to_syntax(None)),
                     expander.introduce(ast.datum_to_syntax(None)),
-                    CompileTimeEnvoirnment::new()
+                    CompileTimeEnvoirnment::new(),
                 )
             })
             .inspect(|e| println!("after expansion: {e}"))

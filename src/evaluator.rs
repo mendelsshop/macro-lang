@@ -1,5 +1,6 @@
 use crate::{
-    ast::{Ast, Function, Lambda, Pair, Symbol }, DEPTH
+    ast::{Ast, Function, Lambda, Pair, Symbol},
+    DEPTH,
 };
 
 use trace::trace;

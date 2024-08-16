@@ -117,12 +117,6 @@ impl Expander<Binding> {
         self.all_bindings.insert(id, binding);
     }
 
-    pub(crate) fn add_local_binding(&mut self, id: Syntax) -> Symbol {
-        let symbol = self.scope_creator.gen_sym(&id.0 .0);
-        self.add_binding(id, Binding::Variable(symbol.clone()));
-        symbol
-    }
-
     pub(crate) fn resolve(&self, id: &Syntax) -> Result<&Binding, String> {
         let candidate_ids = self.find_all_matching_bindings(id);
         let id = candidate_ids

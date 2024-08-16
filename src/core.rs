@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, rc::Rc};
 
 use crate::{
+    ast::Pair,
     binding::{Binding, CoreForm},
     r#match::try_match_syntax,
     syntax::Syntax,
@@ -26,7 +27,10 @@ impl Expander {
     pub fn core_form_symbol(&mut self, s: Ast) -> Result<Rc<str>, String> {
         try_match_syntax(
             s,
-            Ast::List(vec![Ast::Symbol("id".into()), Ast::Symbol("_".into())]),
+            Ast::Pair(Box::new(Pair(
+                Ast::Symbol("id".into()),
+                Ast::Symbol("_".into()),
+            ))),
         )
         .and_then(|f| {
             // could this also be a plain symbol?

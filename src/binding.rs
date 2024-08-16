@@ -1,4 +1,4 @@
-use crate::{syntax::Syntax, Ast, Expander, Function, Symbol};
+use crate::{syntax::Syntax, Ast, Expander, Symbol};
 use std::{collections::HashMap, fmt, rc::Rc};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -29,22 +29,21 @@ impl From<Binding> for Symbol {
 
 #[derive(Clone)]
 pub enum CompileTimeBinding {
-    Variable,
-    Procedure(Function),
+    Regular(Ast),
     // maybe this should just be Function
     // as we need to capture expander state
     CoreForm(CoreForm),
 }
 pub type CoreForm = fn(&mut Expander, Ast, CompileTimeEnvoirnment) -> Result<Ast, String>;
 #[derive(Clone)]
-pub struct CompileTimeEnvoirnment(HashMap<Symbol, CompileTimeBinding>);
+pub struct CompileTimeEnvoirnment(HashMap<Symbol, Ast>);
 
 impl CompileTimeEnvoirnment {
     pub fn new() -> Self {
         Self(HashMap::new())
     }
 
-    pub fn extend(&self, key: Symbol, value: CompileTimeBinding) -> Self {
+    pub fn extend(&self, key: Symbol, value: Ast) -> Self {
         let mut map = self.0.clone();
         map.insert(key, value);
         Self(map)
@@ -54,14 +53,17 @@ impl CompileTimeEnvoirnment {
         &self,
         key: &Binding,
         // TODO: maybe core form can get their own type
-        core_forms: HashMap<Rc<str>, CoreForm>
+        core_forms: HashMap<Rc<str>, CoreForm>,
+        variable: Symbol,
     ) -> Option<CompileTimeBinding> {
         match key {
-            Binding::Variable(key) => self.0.get(key).cloned(),
-            Binding::CoreBinding(core) => Some(core_forms
-                .get(core)
-                .map(|f| CompileTimeBinding::CoreForm(f.clone()))
-                .unwrap_or(CompileTimeBinding::Variable)),
+            Binding::Variable(key) => self.0.get(key).cloned().map(CompileTimeBinding::Regular),
+            Binding::CoreBinding(core) => Some(
+                core_forms
+                    .get(core)
+                    .map(|f| CompileTimeBinding::CoreForm(f.clone()))
+                    .unwrap_or(CompileTimeBinding::Regular(Ast::Symbol(variable))),
+            ),
         }
     }
 }

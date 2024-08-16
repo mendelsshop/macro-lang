@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 use itertools::Itertools;
 
@@ -41,18 +41,17 @@ pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Op
                             "bad syntax {original_s}, expected one or more {fst}"
                         )),
                         // pair s
-                        _ if flat_s.list() => Ok((flat_s
-                            .foldl(
-                                |s, vars: Result<Vec<HashMap<Symbol, Ast>>, String>| {
-                                    vars.and_then(|mut vars| {
-                                        r#match(s, fst.clone(), original_s).map(|s| {
-                                            vars.push(s);
-                                            vars
-                                        })
+                        _ if flat_s.list() => Ok((flat_s.foldl(
+                            |s, vars: Result<Vec<HashMap<Symbol, Ast>>, String>| {
+                                vars.and_then(|mut vars| {
+                                    r#match(s, fst.clone(), original_s).map(|s| {
+                                        vars.push(s);
+                                        vars
                                     })
-                                },
-                                Ok(vec![]),
-                            )?)?
+                                })
+                            },
+                            Ok(vec![]),
+                        )?)?
                         .into_iter()
                         .flatten()
                         .chunk_by(|vars| vars.0.clone())

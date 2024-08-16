@@ -4,10 +4,11 @@ use std::{
     rc::Rc,
 };
 
-use crate::{evaluator::{self, Env}, scope::Scope, syntax::Syntax};
-
-
-
+use crate::{
+    evaluator::{self, Env},
+    scope::Scope,
+    syntax::Syntax,
+};
 
 pub type AnalyzedResult = Result<Box<dyn AnalyzeFn>, String>;
 
@@ -227,7 +228,7 @@ impl Ast {
         )
     }
 
-   pub fn is_keyword(&self) -> bool {
+    pub fn is_keyword(&self) -> bool {
         // https://docs.racket-lang.org/guide/keywords.html
         false
     }
@@ -243,7 +244,4 @@ impl Ast {
     pub fn list(&self) -> bool {
         matches!(self,  Self::Pair(p) if p.list() ) || *self == Self::TheEmptyList
     }
-
 }
-
-
