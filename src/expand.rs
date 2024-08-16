@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    ast::{Ast, Pair, Symbol},
+    ast::{Ast, Function, Pair, Symbol},
     binding::{CompileTimeBinding, CompileTimeEnvoirnment},
     list,
-    r#match::{self, match_syntax},
+    r#match::match_syntax,
     scope::AdjustScope,
     syntax::Syntax,
     Expander,
@@ -12,10 +12,10 @@ use crate::{
 
 impl Expander {
     pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
-        match s {
+        match s.clone() {
             Ast::Syntax(syntax) => match syntax.0 {
                 Ast::Symbol(symbol) => self.expand_identifier(Syntax(symbol, syntax.1), env),
-                Ast::Pair(p) if p.0.identifier() => self.expand_id_application_form(s, env),
+                Ast::Pair(p) if p.0.identifier() => self.expand_id_application_form(*p, s, env),
                 _ => todo!(),
             },
             _ => todo!(),
@@ -25,21 +25,24 @@ impl Expander {
     // constraints = s[0] == Ast::Syntax(Symbol)
     pub(crate) fn expand_id_application_form(
         &mut self,
-        s: Pair,
+        p: Pair,
+        s: Ast,
         env: CompileTimeEnvoirnment,
     ) -> Result<Ast, String> {
-        let Ast::Syntax(ref id_syntax) = s.0 else {
+        let Ast::Syntax(ref id_syntax) = p.0 else {
             unreachable!()
         };
-        let Ast::Symbol(id) = id_syntax.0 else {
+        let Ast::Symbol(ref id) = id_syntax.0 else {
             unreachable!();
         };
-        let binding = self.resolve(&Syntax(id, id_syntax.1))?;
-        let t = env.lookup(binding, self.core_forms, self.variable);
+        let binding = self.resolve(&Syntax(id.clone(), id_syntax.1.clone()))?;
+        let t = env.lookup(binding, self.core_forms.clone(), self.variable.clone());
         match t {
             Err(_) => self.expand_app(s, env),
-            Ok(CompileTimeBinding::Regular(Ast::Symbol(s))) if s == self.variable => {}
-            Ok(t) => self.dispatch(t, Ast::Pair(Box::new(s)), env),
+            Ok(CompileTimeBinding::Regular(Ast::Symbol(sym))) if sym == self.variable => {
+                self.expand_app(s, env)
+            }
+            Ok(t) => self.dispatch(t, s, env),
         }
     }
 
@@ -63,7 +66,8 @@ impl Expander {
         match t {
             CompileTimeBinding::Regular(t) => match t {
                 Ast::Function(transfromer) => {
-                    self.expand(self.apply_transformer(transfromer, s)?, env)
+                    let apply_transformer = self.apply_transformer(transfromer, s)?;
+                    self.expand(apply_transformer, env)
                 }
                 Ast::Symbol(variable) if variable == self.variable => Ok(s),
                 _ => Err(format!("illegal use of syntax: {t}")),
@@ -80,7 +84,8 @@ impl Expander {
         //println!("macro body {rhs}");
         let expand = self.expand_transformer(rhs, env)?;
         //println!("macro body {expand}");
-        self.expand_time_eval(self.compile(expand)?)
+        let compile = self.compile(expand)?;
+        self.expand_time_eval(compile)
     }
 
     fn expand_transformer(&mut self, rhs: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
@@ -92,18 +97,16 @@ impl Expander {
         s: Ast,
         env: CompileTimeEnvoirnment,
     ) -> Result<Ast, String> {
-        let m = match_syntax(s, list!("rator".into(), "rand".into(), "...".into()))?;
+        let m = match_syntax(s.clone(), list!("rator".into(), "rand".into(), "...".into()))?;
         let rator = m("rator".into()).ok_or("internal error".to_string())?;
         let rand = m("rand".into())
             .ok_or("internal error".to_string())?
-            .map(|rand| self.expand(rand, env))?;
+            .map(|rand| self.expand(rand, env.clone()))?;
         Ok(rebuild(
             s,
             Ast::Pair(Box::new(Pair(
-                "%app"
-                    .into()
-                    .datum_to_syntax(Some(BTreeSet::from([self.core_scope]))),
-                rator,
+                Into::<Ast>::into("%app").datum_to_syntax(Some(BTreeSet::from([self.core_scope]))),
+                Ast::Pair(Box::new(Pair(self.expand(rator, env)?, rand))),
             ))),
         ))
     }
