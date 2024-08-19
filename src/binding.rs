@@ -27,7 +27,7 @@ impl From<Binding> for Symbol {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum CompileTimeBinding {
     Regular(Ast),
     // maybe this should just be Function
@@ -35,7 +35,7 @@ pub enum CompileTimeBinding {
     CoreForm(CoreForm),
 }
 pub type CoreForm = fn(&mut Expander, Ast, CompileTimeEnvoirnment) -> Result<Ast, String>;
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CompileTimeEnvoirnment(pub(crate) HashMap<Symbol, Ast>);
 
 impl Default for CompileTimeEnvoirnment {

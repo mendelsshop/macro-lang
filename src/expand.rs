@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use trace::trace;
+
 use crate::{
     ast::{Ast, Function, Pair, Symbol},
     binding::{CompileTimeBinding, CompileTimeEnvoirnment},
@@ -7,7 +9,7 @@ use crate::{
     r#match::match_syntax,
     scope::AdjustScope,
     syntax::Syntax,
-    Expander,
+    Expander, DEPTH,
 };
 
 impl Expander {
@@ -16,9 +18,27 @@ impl Expander {
             Ast::Syntax(syntax) => match syntax.0 {
                 Ast::Symbol(symbol) => self.expand_identifier(Syntax(symbol, syntax.1), env),
                 Ast::Pair(p) if p.0.identifier() => self.expand_id_application_form(*p, s, env),
-                _ => todo!(),
+                Ast::Pair(_) => self.expand_app(s, env),
+                Ast::TheEmptyList => self.expand_app(s, env),
+                _ => Ok(rebuild(
+                    s.clone(),
+                    list!(
+                        Ast::Symbol("quote".into())
+                            .datum_to_syntax(Some(BTreeSet::from([self.core_scope]))),
+                        s
+                    ),
+                )),
             },
-            _ => todo!(),
+            Ast::Pair(_) => self.expand_app(s, env),
+            Ast::TheEmptyList => self.expand_app(s, env),
+            _ => Ok(rebuild(
+                s.clone(),
+                list!(
+                    Ast::Symbol("quote".into())
+                        .datum_to_syntax(Some(BTreeSet::from([self.core_scope]))),
+                    s
+                ),
+            )),
         }
     }
     // constraints = s.len() > 0

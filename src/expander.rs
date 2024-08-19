@@ -1239,162 +1239,160 @@ macro_rules! list {
 //    }
 //}
 //
-//#[cfg(test)]
-//mod tests {
-//    use core::panic;
-//
-//    use crate::{ast::Ast, evaluator::Evaluator, reader::Reader};
-//
-//    use super::{Binding, CompileTimeEnvoirnment, Expander};
-//
-//    impl Expander<Binding> {
-//        fn expand_expression(&mut self, e: Ast) -> Result<Ast, String> {
-//            self.expand(
-//                self.namespace_syntax_introduce(e.datum_to_syntax(None)),
-//                CompileTimeEnvoirnment::new(),
-//            )
-//        }
-//
-//        fn compile_eval_expression(&mut self, e: Ast) -> (Ast, Ast) {
-//            let c = self
-//                .expand_expression(e)
-//                .and_then(|e| self.compile(e))
-//                .and_then(|e| Evaluator::eval(e.clone(), self.env.clone()).map(|v| (e, v)));
-//            match c {
-//                Ok(v) => v,
-//                Err(e) => panic!("{}", e),
-//            }
-//        }
-//        fn eval_expression(&mut self, e: Ast, check: Option<Ast>) -> Ast {
-//            let (_, v) = self.compile_eval_expression(e);
-//            check.inspect(|check| assert_eq!(&v, check));
-//            v
-//        }
-//    }
-//
-//    fn add_let(e: &str) -> String {
-//        format!(
-//            "(let-syntax ((let (lambda (stx)
-//                       (datum->syntax
-//                        (cons
-//                         (list (quote-syntax lambda)
-//                               (map car (car (cdr stx)))
-//                               (car (cdr (cdr stx))))
-//                         (map (lambda (b)
-//                                (car (cdr b)))
-//                              (car (cdr stx))))))))
-//                {e})"
-//        )
-//    }
-//
-//    #[test]
-//    fn expander_test_lambda() {
-//        let mut expander = Expander::new();
-//        expander.compile_eval_expression(list!(
-//            Ast::Symbol("lambda".into()),
-//            list!(Ast::Symbol("x".into())),
-//            Ast::Symbol("x".into())
-//        ));
-//    }
-//
-//    #[test]
-//    fn expander_test_basic_let() {
-//        let mut expander = Expander::new();
-//        let mut reader = Reader::new_with_input(&add_let("(lambda (x) (let ((y x)) y))"));
-//        expander.compile_eval_expression(reader.read().unwrap());
-//    }
-//    #[test]
-//    fn expander_test_basic_macro() {
-//        let mut expander = Expander::new();
-//        let mut reader = Reader::new_with_input(
-//            &"(lambda (x)
-//                (let-syntax ((y (lambda (stx) (quote-syntax 7))))
-//     y))",
-//        );
-//        expander.compile_eval_expression(reader.read().unwrap());
-//    }
-//    #[test]
-//    fn expander_test_complex_let() {
-//        let mut expander = Expander::new();
-//        let mut reader = Reader::new_with_input(&add_let(
-//            "(let ((z 9))
-//    (let-syntax (( m (lambda (stx) (car (cdr stx))) ))
-//      (let (( x 5 )
-//            ( y (lambda (z) z) ))
-//        (let (( z 10 ))
-//          (list z (m 10))))))",
-//        ));
-//        expander.compile_eval_expression(reader.read().unwrap());
-//    }
-//
-//    #[test]
-//    fn expander_test_expansion_not_captured() {
-//        let mut expander = Expander::new();
-//        let mut reader = Reader::new_with_input(&add_let(
-//            &"(let ((x 'x-1))
-//    (let-syntax ((m (lambda (stx) (quote-syntax x))))
-//      (let ((x 'x-3))
-//        (m))))",
-//        ));
-//        expander.eval_expression(reader.read().unwrap(), Some(Ast::Symbol("x-1".into())));
-//    }
-//
-//    #[test]
-//    fn expander_test_not_capturing_expansion() {
-//        let mut expander = Expander::new();
-//        let mut reader = Reader::new_with_input(&add_let(
-//            &"(let (( x 'x-1 ))
-//    (let-syntax (( m (lambda (stx)
-//                      (datum->syntax
-//                       (list (quote-syntax let)
-//                             (list (list (quote-syntax x)
-//                                         (quote-syntax 'x-2)))
-//                             (car (cdr stx))))) ))
-//      (let (( x 'x-3 ))
-//        (m x))))",
-//        ));
-//        expander.eval_expression(reader.read().unwrap(), Some(Ast::Symbol("x-3".into())));
-//    }
-//
-//    #[test]
-//    fn expander_test_distinct_generated_variables_via_introduction_scope() {
-//        let mut expander = Expander::new();
-//        let mut reader = Reader::new_with_input(&add_let(
-//            &"(let-syntax (( gen2 (lambda (stx)
-//                        (datum->syntax
-//                         (list (quote-syntax let)
-//                               (list (list (car (cdr (cdr stx)))
-//                                           (car (cdr (cdr (cdr (cdr stx))))))
-//                                     (list (car (cdr (cdr (cdr stx))))
-//                                           (car (cdr (cdr (cdr (cdr (cdr stx))))))))
-//                               (list (quote-syntax list)
-//                                     (car (cdr (cdr stx)))
-//                                     (car (cdr (cdr (cdr stx)))))))) ))
-//    (let-syntax (( gen1 (lambda (stx)
-//                         (datum->syntax
-//                          (cons (car (cdr stx))
-//                                (cons (quote-syntax gen2)
-//                                      (cons (quote-syntax x)
-//                                            (cdr (cdr stx))))))) ))
-//      (gen1 gen1 1 2)))",
-//        ));
-//        expander.eval_expression(
-//            reader.read().unwrap(),
-//            Some(list!(Ast::Number(1.), Ast::Number(2.))),
-//        );
-//    }
-//    #[test]
-//    fn expander_test_non_transformer_binding_misuse() {
-//        let mut expander = Expander::new();
-//        let mut reader = Reader::new_with_input(
-//            &"(let-syntax ((v 1))
-//                            v)",
-//        );
-//        assert!(expander
-//            .expand(
-//                expander.namespace_syntax_introduce(reader.read().unwrap().datum_to_syntax(None)),
-//                CompileTimeEnvoirnment::new()
-//            )
-//            .is_err_and(|e| e.contains("illegal use of syntax")))
-//    }
-//}
+#[cfg(test)]
+mod tests {
+
+    use crate::{ast::Ast, binding::CompileTimeEnvoirnment, evaluator::Evaluator, reader::Reader, Expander};
+
+
+    impl Expander {
+        fn expand_expression(&mut self, e: Ast) -> Result<Ast, String> {
+            self.expand(
+                self.namespace_syntax_introduce(e.datum_to_syntax(None)),
+                CompileTimeEnvoirnment::new(),
+            )
+        }
+
+        fn compile_eval_expression(&mut self, e: Ast) -> (Ast, Ast) {
+            let c = self
+                .expand_expression(e)
+                .and_then(|e| self.compile(e))
+                .and_then(|e| Evaluator::eval(e.clone(), self.run_time_env.clone()).map(|v| (e, v)));
+            match c {
+                Ok(v) => v,
+                Err(e) => panic!("{}", e),
+            }
+        }
+        fn eval_expression(&mut self, e: Ast, check: Option<Ast>) -> Ast {
+            let (_, v) = self.compile_eval_expression(e);
+            check.inspect(|check| assert_eq!(&v, check));
+            v
+        }
+    }
+
+    fn add_let(e: &str) -> String {
+        format!(
+            "(let-syntax ((let (lambda (stx)
+                       (datum->syntax
+                        (cons
+                         (list (quote-syntax lambda)
+                               (map car (car (cdr stx)))
+                               (car (cdr (cdr stx))))
+                         (map (lambda (b)
+                                (car (cdr b)))
+                              (car (cdr stx))))))))
+                {e})"
+        )
+    }
+
+    #[test]
+    fn expander_test_lambda() {
+        let mut expander = Expander::new();
+        expander.compile_eval_expression(list!(
+            Ast::Symbol("lambda".into()),
+            list!(Ast::Symbol("x".into())),
+            Ast::Symbol("x".into())
+        ));
+    }
+
+    #[test]
+    fn expander_test_basic_let() {
+        let mut expander = Expander::new();
+        let mut reader = Reader::new_with_input(&add_let("(lambda (x) (let ((y x)) y))"));
+        expander.compile_eval_expression(reader.read().unwrap());
+    }
+    #[test]
+    fn expander_test_basic_macro() {
+        let mut expander = Expander::new();
+        let mut reader = Reader::new_with_input(
+            &"(lambda (x)
+                (let-syntax ((y (lambda (stx) (quote-syntax 7))))
+     y))",
+        );
+        expander.compile_eval_expression(reader.read().unwrap());
+    }
+    #[test]
+    fn expander_test_complex_let() {
+        let mut expander = Expander::new();
+        let mut reader = Reader::new_with_input(&add_let(
+            "(let ((z 9))
+    (let-syntax (( m (lambda (stx) (car (cdr stx))) ))
+      (let (( x 5 )
+            ( y (lambda (z) z) ))
+        (let (( z 10 ))
+          (list z (m 10))))))",
+        ));
+        expander.compile_eval_expression(reader.read().unwrap());
+    }
+
+    #[test]
+    fn expander_test_expansion_not_captured() {
+        let mut expander = Expander::new();
+        let mut reader = Reader::new_with_input(&add_let(
+            &"(let ((x 'x-1))
+    (let-syntax ((m (lambda (stx) (quote-syntax x))))
+      (let ((x 'x-3))
+        (m))))",
+        ));
+        expander.eval_expression(reader.read().unwrap(), Some(Ast::Symbol("x-1".into())));
+    }
+
+    #[test]
+    fn expander_test_not_capturing_expansion() {
+        let mut expander = Expander::new();
+        let mut reader = Reader::new_with_input(&add_let(
+            &"(let (( x 'x-1 ))
+    (let-syntax (( m (lambda (stx)
+                      (datum->syntax
+                       (list (quote-syntax let)
+                             (list (list (quote-syntax x)
+                                         (quote-syntax 'x-2)))
+                             (car (cdr stx))))) ))
+      (let (( x 'x-3 ))
+        (m x))))",
+        ));
+        expander.eval_expression(reader.read().unwrap(), Some(Ast::Symbol("x-3".into())));
+    }
+
+    #[test]
+    fn expander_test_distinct_generated_variables_via_introduction_scope() {
+        let mut expander = Expander::new();
+        let mut reader = Reader::new_with_input(&add_let(
+            &"(let-syntax (( gen2 (lambda (stx)
+                        (datum->syntax
+                         (list (quote-syntax let)
+                               (list (list (car (cdr (cdr stx)))
+                                           (car (cdr (cdr (cdr (cdr stx))))))
+                                     (list (car (cdr (cdr (cdr stx))))
+                                           (car (cdr (cdr (cdr (cdr (cdr stx))))))))
+                               (list (quote-syntax list)
+                                     (car (cdr (cdr stx)))
+                                     (car (cdr (cdr (cdr stx)))))))) ))
+    (let-syntax (( gen1 (lambda (stx)
+                         (datum->syntax
+                          (cons (car (cdr stx))
+                                (cons (quote-syntax gen2)
+                                      (cons (quote-syntax x)
+                                            (cdr (cdr stx))))))) ))
+      (gen1 gen1 1 2)))",
+        ));
+        expander.eval_expression(
+            reader.read().unwrap(),
+            Some(list!(Ast::Number(1.), Ast::Number(2.))),
+        );
+    }
+    #[test]
+    fn expander_test_non_transformer_binding_misuse() {
+        let mut expander = Expander::new();
+        let mut reader = Reader::new_with_input(
+            &"(let-syntax ((v 1))
+                            v)",
+        );
+        assert!(expander
+            .expand(
+                expander.namespace_syntax_introduce(reader.read().unwrap().datum_to_syntax(None)),
+                CompileTimeEnvoirnment::new()
+            )
+            .is_err_and(|e| e.contains("illegal use of syntax")))
+    }
+}

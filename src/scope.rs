@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::{syntax::Syntax, Ast, Binding, Expander, Symbol};
+use crate::{ast::Pair, syntax::Syntax, Ast, Binding, Expander, Symbol};
 
 pub type ScopeSet = BTreeSet<Scope>;
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -52,9 +52,10 @@ impl AdjustScope for Ast {
         operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
     ) -> Self {
         match self {
-            list if list.list() => list
-                .map(|x| Ok(x.adjust_scope(other_scope, operation)))
-                .unwrap_or(list),
+            Ast::Pair(p) => Ast::Pair(Box::new(Pair(
+                p.0.adjust_scope(other_scope, operation),
+                p.1.adjust_scope(other_scope, operation),
+            ))),
             Self::Syntax(s) => Self::Syntax(Box::new(s.adjust_scope(other_scope, operation))),
             _ => self,
         }
