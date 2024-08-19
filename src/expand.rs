@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-
 use crate::{
     ast::{Ast, Function, Pair, Symbol},
     binding::{CompileTimeBinding, CompileTimeEnvoirnment},
@@ -128,6 +127,7 @@ impl Expander {
         let rand = m("rand".into())
             .ok_or("internal error".to_string())?
             .map(|rand| self.expand(rand, env.clone()))?;
+        println!("rand {rand}");
         Ok(rebuild(
             s,
             Ast::Pair(Box::new(Pair(

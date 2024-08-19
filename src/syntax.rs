@@ -38,6 +38,7 @@ impl Ast {
         let wrap = |e| Self::Syntax(Box::new(Syntax(e, scopes.clone().unwrap_or_default())));
         match self {
             Self::Syntax(_) => self,
+            _ if self.list() => wrap(self.map(|e| Ok(e.datum_to_syntax(scopes.clone()))).unwrap()),
             Self::Pair(pair) => wrap(Self::Pair(Box::new(Pair(
                 pair.0.datum_to_syntax(scopes.clone()),
                 pair.1.datum_to_syntax(scopes.clone()),

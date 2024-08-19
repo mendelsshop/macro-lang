@@ -1275,15 +1275,18 @@ mod tests {
 
     fn add_let(e: &str) -> String {
         format!(
-            "(let-syntax ((let (lambda (stx)
+            "(let-syntax (( let (lambda (stx)
                        (datum->syntax
+                        (quote-syntax here)
                         (cons
                          (list (quote-syntax lambda)
-                               (map car (car (cdr stx)))
-                               (car (cdr (cdr stx))))
+                               (map (lambda (b)
+                                      (car (syntax-e b)))
+                                    (syntax-e (car (cdr (syntax-e stx)))))
+                               (car (cdr (cdr (syntax-e stx)))))
                          (map (lambda (b)
-                                (car (cdr b)))
-                              (car (cdr stx))))))))
+                                (car (cdr (syntax-e b))))
+                              (syntax-e (car (cdr (syntax-e stx)))))))) ))
                 {e})"
         )
     }

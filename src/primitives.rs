@@ -36,13 +36,13 @@ impl Ast {
     pub fn primitive_syntax_e(self) -> Result<Self, String> {
         let Self::Pair(e) = self else {
             Err(format!(
-                "arity error: expected 1 argument, got {}",
+                "arity error: expected 1 argument, got {}, syntax e",
                 self.size()
             ))?
         };
         let Pair(Self::Syntax(e), Self::TheEmptyList) = *e else {
             Err(format!(
-                "arity error: expected 1 argument, got {}",
+                "arity error: expected 1 argument, got {} or got non syntax object, syntax e",
                 e.size()
             ))?
         };
@@ -72,14 +72,14 @@ impl Ast {
     pub fn primitive_car(self) -> Result<Self, String> {
         let Self::Pair(e) = self else {
             Err(format!(
-                "arity error: expected 1 argument, got {}",
+                "arity error: expected 1 argument, got {}, car",
                 self.size()
             ))?
         };
 
         let Pair(Self::Pair(e), Self::TheEmptyList) = *e else {
             Err(format!(
-                "arity error: expected 1 argument, got {}",
+                "arity error: expected 1 argument, got {} or given non pair, car",
                 e.size()
             ))?
         };
@@ -89,13 +89,13 @@ impl Ast {
     pub fn primitive_cdr(self) -> Result<Self, String> {
         let Self::Pair(e) = self else {
             Err(format!(
-                "arity error: expected 1 argument, got {}",
+                "arity error: expected 1 argument, got {}, cdr",
                 self.size()
             ))?
         };
         let Pair(Self::Pair(e), Self::TheEmptyList) = *e else {
             Err(format!(
-                "arity error: expected 1 argument, got {}",
+                "arity error: expected 1 argument, got {} or given non pair, cdr",
                 e.size()
             ))?
         };
@@ -107,17 +107,19 @@ impl Ast {
         Ok(self)
     }
     pub fn primitive_map(self) -> Result<Self, String> {
+        println!("{self}");
         let Self::Pair(e) = self else {
             Err(format!(
-                "arity error: expected 1 argument, got {}",
+                "arity error: expected 2 argument, got {}, map",
                 self.size()
             ))?
         };
 
         let Pair(Self::Function(ref f), Self::Pair(ref last)) = *e else {
             Err(format!(
-                "arity error: expected 2 argument, got {}",
-                e.size()
+                "arity error: expected 2 argument, got {}, or given non function {}, map",
+                e.size(),
+                e.0
             ))?
         };
         let Pair(ref l, Self::TheEmptyList) = **last else {

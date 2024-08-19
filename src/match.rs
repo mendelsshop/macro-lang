@@ -8,13 +8,7 @@ use crate::{ast::Pair, Ast, Symbol};
 //  concantinating the values of all a in hash and hash1 into new hashmap
 // just used internally to "parse" stuff
 pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Option<Ast>, String> {
-    fn r#match(
-        s: Ast,
-        pattern: Ast,
-        original_s: &Ast,
-        // HashMap of vec no worky b/c it only vec if matching ...+/...
-        // Need better way to smush ...+/... without replacement
-    ) -> Result<HashMap<Symbol, Ast>, String> {
+    fn r#match(s: Ast, pattern: Ast, original_s: &Ast) -> Result<HashMap<Symbol, Ast>, String> {
         // TODO: make sure pattern mathches ^id
         if let Ast::Symbol(pattern) = pattern {
             if (pattern.0.starts_with("id") || pattern.0.starts_with("id:")) && !s.identifier() {
@@ -88,7 +82,11 @@ pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Op
             }
             // null s, p
         } else if matches!(pattern, Ast::TheEmptyList) {
-            Ok(HashMap::new())
+            if matches!(s, Ast::TheEmptyList) {
+                Ok(HashMap::new())
+            } else {
+                Err(format!("bad syntax {original_s}"))
+            }
         } else if matches!(pattern, Ast::Boolean(_)) || pattern.is_keyword() && pattern == s {
             Ok(HashMap::new())
         } else {
