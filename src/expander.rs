@@ -487,7 +487,7 @@ impl Expander {
 //    }
 //}
 //
-//// or maybe return error in resolve, instead of option
+/// or maybe return error in resolve, instead of option
 //pub fn check_unambiguous<'a>(
 //    id: &Syntax,
 //    mut candidate_ids: impl Iterator<Item = &'a Syntax>,

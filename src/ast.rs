@@ -114,7 +114,7 @@ pub enum Ast {
 pub struct Symbol(pub Rc<str>, pub usize);
 impl From<&str> for Ast {
     fn from(value: &str) -> Self {
-        Ast::Symbol(value.into())
+        Self::Symbol(value.into())
     }
 }
 
@@ -247,7 +247,7 @@ impl Ast {
 
     pub(crate) fn scope_set(&self) -> Option<BTreeSet<Scope>> {
         match self {
-            Ast::Syntax(s) => Some(s.1.clone()),
+            Self::Syntax(s) => Some(s.1.clone()),
             _ => None,
         }
     }

@@ -5,7 +5,7 @@ use crate::{
     binding::{Binding, CoreForm},
     r#match::try_match_syntax,
     syntax::Syntax,
-    Ast, Expander, Function, Symbol,
+    Ast, Expander, Symbol,
 };
 
 impl Expander {
@@ -19,7 +19,7 @@ impl Expander {
         self.add_core_binding(sym.clone().into());
         self.core_forms.insert(sym, proc);
     }
-    pub fn add_core_primitive(&mut self, sym: Rc<str>, proc: Function) {
+    pub fn add_core_primitive(&mut self, sym: Rc<str>, proc: Ast) {
         self.add_core_binding(sym.clone().into());
         self.core_primitives.insert(sym, proc);
     }
@@ -35,10 +35,10 @@ impl Expander {
         .and_then(|f| {
             // could this also be a plain symbol?
             let Some(Ast::Syntax(s)) = f("id".into()) else {
-                return Err(format!("no such pattern variable id"));
+                return Err("no such pattern variable id".to_string());
             };
             let Ast::Symbol(sym) = s.0 else {
-                return Err(format!("no such pattern variable id"));
+                return Err("no such pattern variable id".to_string());
             };
             let b = self.resolve(&Syntax(sym.clone(), s.1))?;
             match b {

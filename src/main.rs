@@ -3,9 +3,9 @@
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
 use std::io::{BufRead, BufReader, Write};
 
-use ast::{Ast, Function, Symbol};
+use ast::{Ast, Symbol};
 use binding::CompileTimeEnvoirnment;
-use evaluator::{Env, EnvRef, Evaluator};
+use evaluator::{Env, EnvRef};
 
 trace::init_depth_var!();
 
@@ -13,8 +13,10 @@ mod ast;
 mod evaluator;
 mod expand_expr;
 mod expander;
+mod primitives;
 mod reader;
 use binding::{Binding, CoreForm};
+use primitives::new_primitive_env;
 use scope::{AdjustScope, Scope};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -87,7 +89,7 @@ impl Ast {
 #[derive(Debug)]
 pub struct Expander {
     core_forms: HashMap<Rc<str>, CoreForm>,
-    core_primitives: HashMap<Rc<str>, Function>,
+    core_primitives: HashMap<Rc<str>, Ast>,
     core_scope: Scope,
     scope_creator: UniqueNumberManager,
     all_bindings: HashMap<Syntax<Symbol>, Binding>,
@@ -108,35 +110,22 @@ impl Expander {
     pub fn new() -> Self {
         let mut scope_creator = UniqueNumberManager::new();
         let core_scope = scope_creator.new_scope();
-        let core_primitives = BTreeSet::from([
-            Binding::CoreBinding("datum->syntax".into()),
-            Binding::CoreBinding("syntax->datum".into()),
-            Binding::CoreBinding("list".into()),
-            Binding::CoreBinding("cons".into()),
-            Binding::CoreBinding("car".into()),
-            Binding::CoreBinding("cdr".into()),
-            Binding::CoreBinding("map".into()),
-        ]);
+        let variable = scope_creator.gen_sym("variable");
         let mut this = Self {
             core_syntax: Syntax(Ast::Boolean(false), BTreeSet::from([core_scope])),
             scope_creator,
             core_scope,
-            core_primitives,
+            core_primitives: HashMap::new(),
             core_forms: HashMap::new(),
             all_bindings: HashMap::new(),
             run_time_env: Env::new_env(),
             expand_env: Env::new_env(),
+            variable,
         };
         this.add_core_forms();
-        this.core_forms
-            .clone()
-            .union(&this.core_primitives.clone())
-            .for_each(|core| {
-                this.all_bindings.add_binding(
-                    Syntax(core.clone().into(), BTreeSet::from([this.core_scope])),
-                    core.clone(),
-                );
-            });
+        new_primitive_env(|name, primitive| {
+            this.add_core_primitive(name, primitive);
+        });
         this
     }
 

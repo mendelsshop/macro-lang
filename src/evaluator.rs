@@ -1,5 +1,6 @@
 use crate::{
     ast::{Ast, Function, Lambda, Pair, Symbol},
+    primitives::new_primitive_env,
     DEPTH,
 };
 
@@ -16,153 +17,9 @@ pub struct Env {
 impl Env {
     pub fn new_env() -> Rc<RefCell<Self>> {
         let env = Self::new();
-        env.borrow_mut().define(
-            Symbol("datum->syntax".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                let Ast::Pair(e) = e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                let Pair(e, Ast::TheEmptyList) = *e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                Ok(e.datum_to_syntax(None))
-            })),
-        );
-        env.borrow_mut().define(
-            Symbol("syntax->datum".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                let Ast::Pair(e) = e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                let Pair(e, Ast::TheEmptyList) = *e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                Ok(e.syntax_to_datum())
-            })),
-        );
-        env.borrow_mut().define(
-            Symbol("syntax-e".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                let Ast::Pair(e) = e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                let Pair(Ast::Syntax(e), Ast::TheEmptyList) = *e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                Ok(e.0)
-            })),
-        );
-        env.borrow_mut().define(
-            Symbol("cons".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                let Ast::Pair(e) = e else {
-                    Err(format!(
-                        "arity error: expected 2 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                let Pair(ref fst, Ast::Pair(ref last)) = *e else {
-                    Err(format!(
-                        "arity error: expected 2 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                let Pair(ref snd, Ast::TheEmptyList) = **last else {
-                    Err(format!(
-                        "arity error: expected 2 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                Ok(Ast::Pair(Box::new(Pair(fst.clone(), snd.clone()))))
-            })),
-        );
-        env.borrow_mut().define(
-            Symbol("car".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                let Ast::Pair(e) = e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-
-                let Pair(Ast::Pair(e), Ast::TheEmptyList) = *e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                let Pair(fst, _) = *e;
-                Ok(fst)
-            })),
-        );
-        env.borrow_mut().define(
-            Symbol("cdr".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                //println!("cdr {e}");
-                let Ast::Pair(e) = e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                let Pair(Ast::Pair(e), Ast::TheEmptyList) = *e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                let Pair(_, snd) = *e;
-                Ok(snd)
-            })),
-        );
-        env.borrow_mut().define(
-            Symbol("list".into(), 0),
-            Ast::Function(Function::Primitive(Ok)),
-        );
-        env.borrow_mut().define(
-            Symbol("map".into(), 0),
-            Ast::Function(Function::Primitive(move |e| {
-                let Ast::Pair(e) = e else {
-                    Err(format!(
-                        "arity error: expected 1 argument, got {}",
-                        e.size()
-                    ))?
-                };
-
-                let Pair(Ast::Function(ref f), Ast::Pair(ref last)) = *e else {
-                    Err(format!(
-                        "arity error: expected 2 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                let Pair(ref l, Ast::TheEmptyList) = **last else {
-                    Err(format!(
-                        "arity error: expected 2 argument, got {}",
-                        e.size()
-                    ))?
-                };
-                l.map(|a| f.apply(Ast::Pair(Box::new(Pair(a, Ast::TheEmptyList)))))
-            })),
-        );
+        new_primitive_env(|name, primitive| {
+            env.borrow_mut().define(name.into(), primitive);
+        });
         env
     }
     fn lookup(&self, symbol: &Symbol) -> Option<Ast> {

@@ -71,7 +71,7 @@ impl Expander {
         let id = candidate_ids
             .clone()
             .max_by_key(|id| id.1.len())
-            .ok_or(format!("free variable {:?}", id))?;
+            .ok_or(format!("free variable {id:?}"))?;
         if check_unambiguous(id, candidate_ids) {
             self.all_bindings
                 .get(id)

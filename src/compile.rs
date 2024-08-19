@@ -12,7 +12,7 @@ impl Expander {
             Ast::Pair(_) => {
                 let core_sym = self
                     .core_form_symbol(s.clone())
-                    .map_err(|_| format!("not a core form {}", s))?;
+                    .map_err(|_| format!("not a core form {s}"))?;
                 match core_sym.to_string().as_str() {
                     "lambda" => {
                         let m = match_syntax(
@@ -64,11 +64,10 @@ impl Expander {
                         .core_primitives
                         .get(s)
                         .ok_or(format!("missing core bindig for primitive {s}"))
-                        .cloned()
-                        .map(Ast::Function),
+                        .cloned(),
                 }
             }
-            _ => Err(format!("bad syntax after expansion {}", s)),
+            _ => Err(format!("bad syntax after expansion {s}")),
         }
     }
 

@@ -31,7 +31,7 @@ pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Op
                     let Ast::Symbol(Symbol(str, _)) = second.0 else {
                         panic!()
                     };
-                    let flat_s = s.clone().to_synax_list();
+                    let flat_s = s.to_synax_list();
                     match flat_s {
                         // null s
                         Ast::TheEmptyList if *str == *"..." => {

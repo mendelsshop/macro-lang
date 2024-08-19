@@ -38,6 +38,12 @@ pub type CoreForm = fn(&mut Expander, Ast, CompileTimeEnvoirnment) -> Result<Ast
 #[derive(Clone)]
 pub struct CompileTimeEnvoirnment(pub(crate) HashMap<Symbol, Ast>);
 
+impl Default for CompileTimeEnvoirnment {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CompileTimeEnvoirnment {
     pub fn new() -> Self {
         Self(HashMap::new())
@@ -65,8 +71,7 @@ impl CompileTimeEnvoirnment {
                 .ok_or(format!("identifier used out of context: {key}")),
             Binding::CoreBinding(core) => Ok(core_forms
                 .get(core)
-                .map(|f| CompileTimeBinding::CoreForm(f.clone()))
-                .unwrap_or(CompileTimeBinding::Regular(Ast::Symbol(variable)))),
+                .map_or(CompileTimeBinding::Regular(Ast::Symbol(variable)), |f| CompileTimeBinding::CoreForm(*f))),
         }
     }
 }

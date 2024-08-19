@@ -14,7 +14,7 @@ impl TryFrom<Ast> for Syntax<Symbol> {
         let Ast::Symbol(id) = s.0 else {
             return Err("not a syntax object wrapping a symbol".to_string());
         };
-        Ok(Syntax(id, s.1))
+        Ok(Self(id, s.1))
     }
 }
 
@@ -56,7 +56,7 @@ impl Ast {
         }
     }
     pub fn identifier(&self) -> bool {
-        matches!( self, Ast::Syntax(s) if  matches!(**s,Syntax(Ast::Symbol(_), _)))
+        matches!( self, Self::Syntax(s) if  matches!(**s,Syntax(Self::Symbol(_), _)))
     }
 }
 impl<T: Clone + Debug + PartialEq> Syntax<T> {

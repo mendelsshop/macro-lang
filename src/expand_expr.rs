@@ -28,7 +28,7 @@ impl Expander {
         )?;
         let sc = self.scope_creator.new_scope();
         let ids = m("id".into()).ok_or("internal error".to_string())?;
-        let ids = ids.clone().map_pair(|term, base| match term {
+        let ids = ids.map_pair(|term, base| match term {
             Ast::Syntax(id) => {
                 let id = id.add_scope(sc);
                 Ok(Ast::Syntax(Box::new(id)))
@@ -75,7 +75,7 @@ impl Expander {
     }
     fn core_form_let_syntax(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
         let m = match_syntax(
-            s.clone(),
+            s,
             list!(
                 "let-syntax".into(),
                 list!(list!("trans-id".into(), "trans-rhs".into()), "...".into()),
@@ -107,16 +107,15 @@ impl Expander {
             .ok_or("internal error".to_string())?
             .foldl(
                 |current_rhs, rhss: Result<Vec<Ast>, String>| {
-                    rhss.and_then(|mut rhss| {
-                        self.eval_for_syntax_binding(current_rhs, env.clone())
-                            .map(|current_rhs| rhss.push(current_rhs));
-                        Ok(rhss)
+                    rhss.map(|mut rhss| {
+                        if let Ok(current_rhs) = self.eval_for_syntax_binding(current_rhs, env.clone()) { rhss.push(current_rhs) }
+                        rhss
                     })
                 },
                 Ok(vec![]),
             )??;
         let body_env =
-            CompileTimeEnvoirnment(trans_ids.into_iter().zip(trans_vals.into_iter()).collect());
+            CompileTimeEnvoirnment(trans_ids.into_iter().zip(trans_vals).collect());
         self.expand(
             m("body".into()).ok_or("internal error")?.add_scope(sc),
             body_env,
@@ -124,7 +123,7 @@ impl Expander {
     }
     fn core_form_app(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
         let m = match_syntax(
-            s.clone(),
+            s,
             //TODO: should app be a syntax object
             list!("%app".into(), "rator".into(), "rand".into(), "...".into()),
         )?;
