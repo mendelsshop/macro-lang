@@ -32,7 +32,6 @@ impl Expander {
                         ))
                     }
                     "%app" => {
-                        //println!("app {s}");
                         let m = match_syntax(
                             s,
                             // TODO: should this (%app) be a syntax object

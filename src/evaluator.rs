@@ -97,7 +97,6 @@ pub struct Evaluator {}
 impl Evaluator {
     #[trace]
     pub(crate) fn eval(expr: Ast, env: EnvRef) -> Result<Ast, String> {
-        //println!("eval {expr}");
         match expr {
             Ast::Pair(list) => match list.0 {
                 Ast::Symbol(Symbol(ref lambda, 0)) if **lambda == *"lambda" => {
@@ -135,13 +134,7 @@ impl Evaluator {
                     Self::execute_application(f, rest)
                 } //Ast::TheEmptyList => Err(format!("bad syntax {list:?}, empty application")),
             },
-            Ast::Symbol(s) =>
-            //println!("variable {s})");
-            {
-                env.borrow().lookup(&s).ok_or(format!("free variable {s}"))
-            }
-            //.inspect(|x|println!("variable {x}"))
-            ,
+            Ast::Symbol(s) => env.borrow().lookup(&s).ok_or(format!("free variable {s}")),
             _ => Ok(expr.clone()),
         }
     }
@@ -149,7 +142,6 @@ impl Evaluator {
     pub(crate) fn execute_application(f: Ast, args: Ast) -> Result<Ast, String> {
         if let Ast::Function(f) = f {
             f.apply(args)
-            //.inspect(|x|println!("application {x}"))
         } else {
             Err(format!(
                 "cannot not apply {f} to {args:?}, because {f} is not a function"

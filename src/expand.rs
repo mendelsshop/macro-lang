@@ -68,7 +68,6 @@ impl Expander {
 
     pub(crate) fn apply_transformer(&mut self, m: Function, s: Ast) -> Result<Ast, String> {
         let intro_scope = self.scope_creator.new_scope();
-        //println!("apply_transformer {s:?}");
         let intro_s = s.add_scope(intro_scope);
         let transformed_s = m.apply(Ast::Pair(Box::new(Pair(intro_s, Ast::TheEmptyList))))?;
         if !matches!(transformed_s, Ast::Syntax(_)) {
@@ -101,12 +100,8 @@ impl Expander {
         env: CompileTimeEnvoirnment,
     ) -> Result<Ast, String> {
         // let var_name = format!("problem `evaluating` macro {rhs}");
-        //println!("macro body {rhs}");
         let expand = self.expand_transformer(rhs, env)?;
-        let compile = self
-            .compile(expand)
-            .inspect_err(|e| println!("error {e}"))
-            .inspect(|ok| println!("ok {ok}"))?;
+        let compile = self.compile(expand)?;
         self.expand_time_eval(compile)
     }
 
@@ -127,7 +122,6 @@ impl Expander {
         let rand = m("rand".into())
             .ok_or("internal error".to_string())?
             .map(|rand| self.expand(rand, env.clone()))?;
-        println!("rand {rand}");
         Ok(rebuild(
             s,
             Ast::Pair(Box::new(Pair(

@@ -47,6 +47,8 @@ pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Op
                             Ok(vec![]),
                         )?)?
                         .into_iter()
+                        // TODO: maybe better way to get/garuntee matches are in correct order
+                        .rev()
                         .flatten()
                         .chunk_by(|vars| vars.0.clone())
                         .into_iter()

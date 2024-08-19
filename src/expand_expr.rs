@@ -61,7 +61,6 @@ impl Expander {
             },
             Ok(env),
         )?;
-        //println!("{body_env:?}");
         let exp_body = self.expand(
             m("body".into())
                 .ok_or("internal error".to_string())?
@@ -96,7 +95,6 @@ impl Expander {
                         Ast::Syntax(id) if matches!(id.0, Ast::Symbol(_)) => {
                             let id = id.add_scope(sc);
                             let id: Syntax<Symbol> = id.try_into()?;
-                            //println!("{id:?}");
                             ids.push(self.add_local_binding(id));
 
                             Ok(ids)
@@ -120,12 +118,9 @@ impl Expander {
                 },
                 Ok(vec![]),
             )??;
-        //println!("{trans_ids:?}");
-        //println!("{trans_vals:?}");
         let mut hash_map = env.0;
         hash_map.extend(trans_ids.into_iter().zip(trans_vals));
         let body_env = CompileTimeEnvoirnment(hash_map);
-        //println!("let-s {body_env:?}");
         self.expand(
             m("body".into()).ok_or("internal error")?.add_scope(sc),
             body_env,
@@ -144,7 +139,6 @@ impl Expander {
         let rand = m("rator".into())
             .ok_or("internal error".to_string())?
             .map(|rand| self.expand(rand, env.clone()))?;
-        println!("rand {rand}");
         Ok(Ast::Pair(Box::new(Pair(
             m("%app".into()).ok_or("internal error")?,
             Ast::Pair(Box::new(Pair(rator, rand))),

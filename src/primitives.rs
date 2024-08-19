@@ -4,19 +4,17 @@ use crate::ast::{Ast, Function, Pair};
 
 impl Ast {
     pub fn primitive_datum_to_syntax(self) -> Result<Self, String> {
+        let arity = self.size();
         let Self::Pair(e) = self else {
-            Err(format!(
-                "arity error: expected 1 argument, got {}",
-                self.size()
-            ))?
+            Err(format!("arity error: expected 2 argument, got {arity}",))?
         };
-        let Pair(e, Self::TheEmptyList) = *e else {
-            Err(format!(
-                "arity error: expected 1 argument, got {}",
-                e.size()
-            ))?
+        let Pair(scopes, Self::Pair(syntax_object)) = *e else {
+            Err(format!("arity error: expected 2 argument, got {arity}"))?
         };
-        Ok(e.datum_to_syntax(None))
+        let Pair(syntax_object, Self::TheEmptyList) = *syntax_object else {
+            Err(format!("arity error: expected 1 argument, got {arity}"))?
+        };
+        Ok(syntax_object.datum_to_syntax(scopes.scope_set()))
     }
     pub fn primitive_syntax_to_datum(self) -> Result<Self, String> {
         let Self::Pair(e) = self else {
@@ -107,7 +105,6 @@ impl Ast {
         Ok(self)
     }
     pub fn primitive_map(self) -> Result<Self, String> {
-        println!("{self}");
         let Self::Pair(e) = self else {
             Err(format!(
                 "arity error: expected 2 argument, got {}, map",
