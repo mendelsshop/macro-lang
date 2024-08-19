@@ -1322,7 +1322,7 @@ mod tests {
         let mut expander = Expander::new();
         let mut reader = Reader::new_with_input(&add_let(
             "(let ((z 9))
-    (let-syntax (( m (lambda (stx) (car (cdr stx))) ))
+    (let-syntax (( m (lambda (stx) (car (cdr (syntax-e stx)))) ))
       (let (( x 5 )
             ( y (lambda (z) z) ))
         (let (( z 10 ))
@@ -1350,10 +1350,11 @@ mod tests {
             "(let (( x 'x-1 ))
     (let-syntax (( m (lambda (stx)
                       (datum->syntax
+(quote-syntax here)
                        (list (quote-syntax let)
                              (list (list (quote-syntax x)
                                          (quote-syntax 'x-2)))
-                             (car (cdr stx))))) ))
+                             (car (cdr (syntax-e stx)))))) ))
       (let (( x 'x-3 ))
         (m x))))",
         ));
@@ -1366,20 +1367,22 @@ mod tests {
         let mut reader = Reader::new_with_input(&add_let(
             "(let-syntax (( gen2 (lambda (stx)
                         (datum->syntax
+(quote-syntax here)
                          (list (quote-syntax let)
-                               (list (list (car (cdr (cdr stx)))
-                                           (car (cdr (cdr (cdr (cdr stx))))))
-                                     (list (car (cdr (cdr (cdr stx))))
-                                           (car (cdr (cdr (cdr (cdr (cdr stx))))))))
+                               (list (list (car (cdr (cdr (syntax-e stx))))
+                                           (car (cdr (cdr (cdr (cdr (syntax-e stx)))))))
+                                     (list (car (cdr (cdr (cdr (syntax-e stx)))))
+                                           (car (cdr (cdr (cdr (cdr (cdr (syntax-e stx)))))))))
                                (list (quote-syntax list)
-                                     (car (cdr (cdr stx)))
-                                     (car (cdr (cdr (cdr stx)))))))) ))
-    (let-syntax (( gen1 (lambda (stx)
+                                     (car (cdr (cdr (syntax-e stx))))
+                                     (car (cdr (cdr (cdr (syntax-e stx))))))))) ))
+    (let-syntax (( gen1 (lambda ( stx)
                          (datum->syntax
-                          (cons (car (cdr stx))
+(quote-syntax here)
+                          (cons (car (cdr (syntax-e stx)))
                                 (cons (quote-syntax gen2)
                                       (cons (quote-syntax x)
-                                            (cdr (cdr stx))))))) ))
+                                            (cdr (cdr (syntax-e stx)))))))) ))
       (gen1 gen1 1 2)))",
         ));
         expander.eval_expression(
