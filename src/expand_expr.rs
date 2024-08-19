@@ -1,3 +1,4 @@
+
 use crate::{
     ast::{Ast, Pair, Symbol},
     binding::CompileTimeEnvoirnment,
@@ -17,6 +18,7 @@ impl Expander {
         self.add_core_form("quote-syntax".into(), Self::core_form_quote_syntax);
     }
 
+    //#[trace]
     fn core_form_lambda(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
         let m = match_syntax(
             s.clone(),
@@ -26,6 +28,7 @@ impl Expander {
                 "body".into()
             ),
         )?;
+        println!("{s}");
         let sc = self.scope_creator.new_scope();
         let ids = m("id".into()).ok_or("internal error".to_string())?;
         let ids = ids.map_pair(|term, base| match term {
@@ -60,8 +63,11 @@ impl Expander {
             },
             Ok(env),
         )?;
+        println!("{body_env:?}");
         let exp_body = self.expand(
-            m("body".into()).ok_or("internal error".to_string())?,
+            m("body".into())
+                .ok_or("internal error".to_string())?
+                .add_scope(sc),
             body_env,
         )?;
         Ok(rebuild(
@@ -92,6 +98,7 @@ impl Expander {
                         Ast::Syntax(id) if matches!(id.0, Ast::Symbol(_)) => {
                             let id = id.add_scope(sc);
                             let id: Syntax<Symbol> = id.try_into()?;
+                            println!("{id:?}");
                             ids.push(self.add_local_binding(id));
 
                             Ok(ids)
@@ -107,15 +114,20 @@ impl Expander {
             .ok_or("internal error".to_string())?
             .foldl(
                 |current_rhs, rhss: Result<Vec<Ast>, String>| {
-                    rhss.map(|mut rhss| {
-                        if let Ok(current_rhs) = self.eval_for_syntax_binding(current_rhs, env.clone()) { rhss.push(current_rhs) }
-                        rhss
+                    rhss.and_then(|mut rhss| {
+                        let current_rhs = self.eval_for_syntax_binding(current_rhs, env.clone())?;
+                        rhss.push(current_rhs);
+                        Ok(rhss)
                     })
                 },
                 Ok(vec![]),
             )??;
-        let body_env =
-            CompileTimeEnvoirnment(trans_ids.into_iter().zip(trans_vals).collect());
+        println!("{trans_ids:?}");
+        println!("{trans_vals:?}");
+        let mut hash_map = env.0;
+        hash_map.extend(trans_ids.into_iter().zip(trans_vals));
+        let body_env = CompileTimeEnvoirnment(hash_map);
+        println!("let-s {body_env:?}");
         self.expand(
             m("body".into()).ok_or("internal error")?.add_scope(sc),
             body_env,

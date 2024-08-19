@@ -52,7 +52,7 @@ impl AdjustScope for Ast {
         operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
     ) -> Self {
         match self {
-            Ast::Pair(p) => Ast::Pair(Box::new(Pair(
+            Self::Pair(p) => Self::Pair(Box::new(Pair(
                 p.0.adjust_scope(other_scope, operation),
                 p.1.adjust_scope(other_scope, operation),
             ))),

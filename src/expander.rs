@@ -1242,8 +1242,9 @@ macro_rules! list {
 #[cfg(test)]
 mod tests {
 
-    use crate::{ast::Ast, binding::CompileTimeEnvoirnment, evaluator::Evaluator, reader::Reader, Expander};
-
+    use crate::{
+        ast::Ast, binding::CompileTimeEnvoirnment, evaluator::Evaluator, reader::Reader, Expander,
+    };
 
     impl Expander {
         fn expand_expression(&mut self, e: Ast) -> Result<Ast, String> {
@@ -1257,7 +1258,9 @@ mod tests {
             let c = self
                 .expand_expression(e)
                 .and_then(|e| self.compile(e))
-                .and_then(|e| Evaluator::eval(e.clone(), self.run_time_env.clone()).map(|v| (e, v)));
+                .and_then(|e| {
+                    Evaluator::eval(e.clone(), self.run_time_env.clone()).map(|v| (e, v))
+                });
             match c {
                 Ok(v) => v,
                 Err(e) => panic!("{}", e),
@@ -1329,7 +1332,7 @@ mod tests {
     fn expander_test_expansion_not_captured() {
         let mut expander = Expander::new();
         let mut reader = Reader::new_with_input(&add_let(
-            &"(let ((x 'x-1))
+            "(let ((x 'x-1))
     (let-syntax ((m (lambda (stx) (quote-syntax x))))
       (let ((x 'x-3))
         (m))))",
@@ -1341,7 +1344,7 @@ mod tests {
     fn expander_test_not_capturing_expansion() {
         let mut expander = Expander::new();
         let mut reader = Reader::new_with_input(&add_let(
-            &"(let (( x 'x-1 ))
+            "(let (( x 'x-1 ))
     (let-syntax (( m (lambda (stx)
                       (datum->syntax
                        (list (quote-syntax let)
@@ -1358,7 +1361,7 @@ mod tests {
     fn expander_test_distinct_generated_variables_via_introduction_scope() {
         let mut expander = Expander::new();
         let mut reader = Reader::new_with_input(&add_let(
-            &"(let-syntax (( gen2 (lambda (stx)
+            "(let-syntax (( gen2 (lambda (stx)
                         (datum->syntax
                          (list (quote-syntax let)
                                (list (list (car (cdr (cdr stx)))
@@ -1393,6 +1396,6 @@ mod tests {
                 expander.namespace_syntax_introduce(reader.read().unwrap().datum_to_syntax(None)),
                 CompileTimeEnvoirnment::new()
             )
-            .is_err_and(|e| e.contains("illegal use of syntax")))
+            .is_err_and(|e| e.contains("illegal use of syntax")));
     }
 }

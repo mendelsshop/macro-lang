@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use trace::trace;
 
 use crate::{
     ast::{Ast, Function, Pair, Symbol},
@@ -9,10 +8,11 @@ use crate::{
     r#match::match_syntax,
     scope::AdjustScope,
     syntax::Syntax,
-    Expander, DEPTH,
+    Expander,
 };
 
 impl Expander {
+    //#[trace]
     pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
         match s.clone() {
             Ast::Syntax(syntax) => match syntax.0 {
@@ -43,6 +43,7 @@ impl Expander {
     }
     // constraints = s.len() > 0
     // constraints = s[0] == Ast::Syntax(Symbol)
+    //#[trace]
     pub(crate) fn expand_id_application_form(
         &mut self,
         p: Pair,
@@ -103,8 +104,10 @@ impl Expander {
         // let var_name = format!("problem `evaluating` macro {rhs}");
         //println!("macro body {rhs}");
         let expand = self.expand_transformer(rhs, env)?;
-        //println!("macro body {expand}");
-        let compile = self.compile(expand)?;
+        let compile = self
+            .compile(expand)
+            .inspect_err(|e| println!("error {e}"))
+            .inspect(|ok| println!("ok {ok}"))?;
         self.expand_time_eval(compile)
     }
 

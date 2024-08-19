@@ -31,12 +31,14 @@ impl Expander {
                             self.compile(body)?
                         ))
                     }
-                    "#%app" => {
+                    "%app" => {
                         let m = match_syntax(
                             s,
+                            // TODO: should this (%app) be a syntax object
+                            // TODO FIX: the problem seems to be that rest is not a list
                             Ast::Pair(Box::new(Pair("%app".into(), "rest".into()))),
                         )?;
-                        m("id".into())
+                        m("rest".into())
                             .ok_or("internal error")?
                             .map(|s| self.compile(s))
                     }

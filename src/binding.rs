@@ -71,7 +71,9 @@ impl CompileTimeEnvoirnment {
                 .ok_or(format!("identifier used out of context: {key}")),
             Binding::CoreBinding(core) => Ok(core_forms
                 .get(core)
-                .map_or(CompileTimeBinding::Regular(Ast::Symbol(variable)), |f| CompileTimeBinding::CoreForm(*f))),
+                .map_or(CompileTimeBinding::Regular(Ast::Symbol(variable)), |f| {
+                    CompileTimeBinding::CoreForm(*f)
+                })),
         }
     }
 }
