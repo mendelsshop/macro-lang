@@ -97,7 +97,10 @@ impl Expander {
         s: Ast,
         env: CompileTimeEnvoirnment,
     ) -> Result<Ast, String> {
-        let m = match_syntax(s.clone(), list!("rator".into(), "rand".into(), "...".into()))?;
+        let m = match_syntax(
+            s.clone(),
+            list!("rator".into(), "rand".into(), "...".into()),
+        )?;
         let rator = m("rator".into()).ok_or("internal error".to_string())?;
         let rand = m("rand".into())
             .ok_or("internal error".to_string())?

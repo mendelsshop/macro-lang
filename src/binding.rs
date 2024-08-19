@@ -57,13 +57,16 @@ impl CompileTimeEnvoirnment {
         variable: Symbol,
     ) -> Result<CompileTimeBinding, String> {
         match key {
-            Binding::Variable(key) => self.0.get(key).cloned().map(CompileTimeBinding::Regular).ok_or(format!("identifier used out of context: {key}")),
-            Binding::CoreBinding(core) => Ok(
-                core_forms
-                    .get(core)
-                    .map(|f| CompileTimeBinding::CoreForm(f.clone()))
-                    .unwrap_or(CompileTimeBinding::Regular(Ast::Symbol(variable))),
-            ),
+            Binding::Variable(key) => self
+                .0
+                .get(key)
+                .cloned()
+                .map(CompileTimeBinding::Regular)
+                .ok_or(format!("identifier used out of context: {key}")),
+            Binding::CoreBinding(core) => Ok(core_forms
+                .get(core)
+                .map(|f| CompileTimeBinding::CoreForm(f.clone()))
+                .unwrap_or(CompileTimeBinding::Regular(Ast::Symbol(variable)))),
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Ast, Symbol},
+    ast::{Ast, Pair, Symbol},
     binding::CompileTimeEnvoirnment,
     expand::rebuild,
     list,
@@ -122,12 +122,32 @@ impl Expander {
             body_env,
         )
     }
-    fn core_form_app(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {}
-    fn core_form_quote(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {}
+    fn core_form_app(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
+        let m = match_syntax(
+            s.clone(),
+            //TODO: should app be a syntax object
+            list!("%app".into(), "rator".into(), "rand".into(), "...".into()),
+        )?;
+        let rator = self.expand(
+            m("rator".into()).ok_or("internal error".to_string())?,
+            env.clone(),
+        )?;
+        let rand = m("rator".into())
+            .ok_or("internal error".to_string())?
+            .map(|rand| self.expand(rand, env.clone()))?;
+        Ok(Ast::Pair(Box::new(Pair(
+            m("%app".into()).ok_or("internal error")?,
+            Ast::Pair(Box::new(Pair(rator, rand))),
+        ))))
+    }
+    fn core_form_quote(&mut self, s: Ast, _env: CompileTimeEnvoirnment) -> Result<Ast, String> {
+        match_syntax(s.clone(), list!("quote".into(), "datum".into())).map(|_| s)
+    }
     fn core_form_quote_syntax(
         &mut self,
         s: Ast,
-        env: CompileTimeEnvoirnment,
+        _env: CompileTimeEnvoirnment,
     ) -> Result<Ast, String> {
+        match_syntax(s.clone(), list!("quote-syntax".into(), "datum".into())).map(|_| s)
     }
 }

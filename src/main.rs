@@ -11,9 +11,9 @@ trace::init_depth_var!();
 
 mod ast;
 mod evaluator;
+mod expand_expr;
 mod expander;
 mod reader;
-mod expand_expr;
 use binding::{Binding, CoreForm};
 use scope::{AdjustScope, Scope};
 use std::{
@@ -108,12 +108,6 @@ impl Expander {
     pub fn new() -> Self {
         let mut scope_creator = UniqueNumberManager::new();
         let core_scope = scope_creator.new_scope();
-        let core_forms = BTreeSet::from([
-            Binding::CoreBinding("lambda".into()),
-            Binding::CoreBinding("let-syntax".into()),
-            Binding::CoreBinding("quote".into()),
-            Binding::CoreBinding("quote-syntax".into()),
-        ]);
         let core_primitives = BTreeSet::from([
             Binding::CoreBinding("datum->syntax".into()),
             Binding::CoreBinding("syntax->datum".into()),
@@ -128,11 +122,12 @@ impl Expander {
             scope_creator,
             core_scope,
             core_primitives,
-            core_forms,
+            core_forms: HashMap::new(),
             all_bindings: HashMap::new(),
             run_time_env: Env::new_env(),
             expand_env: Env::new_env(),
         };
+        this.add_core_forms();
         this.core_forms
             .clone()
             .union(&this.core_primitives.clone())
