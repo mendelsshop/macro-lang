@@ -1,6 +1,9 @@
 use std::{collections::BTreeSet, fmt::Debug};
 
-use crate::{ast::Pair, scope::ScopeSet, Ast, Scope, Symbol};
+use super::{
+    scope::{Scope, ScopeSet},
+    Ast, Pair, Symbol,
+};
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub struct Syntax<T: Clone + PartialEq + Debug>(pub T, pub ScopeSet);

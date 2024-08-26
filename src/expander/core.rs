@@ -1,11 +1,11 @@
 use std::{collections::BTreeSet, rc::Rc};
 
-use crate::{
-    ast::Pair,
+use crate::ast::{syntax::Syntax, Ast, Pair, Symbol};
+
+use super::{
     binding::{Binding, CoreForm},
     r#match::try_match_syntax,
-    syntax::Syntax,
-    Ast, Expander, Symbol,
+    Expander,
 };
 
 impl Expander {

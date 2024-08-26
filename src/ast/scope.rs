@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 
-use crate::{ast::Pair, syntax::Syntax, Ast, Binding, Expander, Symbol};
+use crate::expander::{binding::Binding, Expander};
+
+use super::{syntax::Syntax, Ast, Pair, Symbol};
 
 pub type ScopeSet = BTreeSet<Scope>;
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

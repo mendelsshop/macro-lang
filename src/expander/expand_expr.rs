@@ -1,12 +1,9 @@
 use crate::{
-    ast::{Ast, Pair, Symbol},
-    binding::CompileTimeEnvoirnment,
-    expand::rebuild,
+    ast::{scope::AdjustScope, syntax::Syntax, Ast, Pair, Symbol},
     list,
-    r#match::match_syntax,
-    syntax::Syntax,
-    AdjustScope, Expander,
 };
+
+use super::{binding::CompileTimeEnvoirnment, expand::rebuild, r#match::match_syntax, Expander};
 
 impl Expander {
     pub fn add_core_forms(&mut self) {

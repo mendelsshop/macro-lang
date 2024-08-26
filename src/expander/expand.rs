@@ -1,16 +1,20 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    ast::{Ast, Function, Pair, Symbol},
-    binding::{CompileTimeBinding, CompileTimeEnvoirnment},
+    ast::{scope::AdjustScope, syntax::Syntax, Ast, Function, Pair, Symbol},
     list,
+};
+
+use super::{
+    binding::{CompileTimeBinding, CompileTimeEnvoirnment},
     r#match::match_syntax,
-    scope::AdjustScope,
-    syntax::Syntax,
     Expander,
 };
 
 impl Expander {
+    pub fn namespace_syntax_introduce<T: AdjustScope>(&self, s: T) -> T {
+        s.add_scope(self.core_scope)
+    }
     //#[trace]
     pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
         match s.clone() {

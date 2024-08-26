@@ -1,5 +1,8 @@
-use crate::{syntax::Syntax, Ast, Expander, Symbol};
 use std::{collections::HashMap, fmt, rc::Rc};
+
+use crate::ast::{syntax::Syntax, Ast, Symbol};
+
+use super::Expander;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Binding {

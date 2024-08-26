@@ -1,7 +1,10 @@
 use crate::{
-    ast::Pair, binding::Binding, evaluator::Evaluator, list, r#match::match_syntax, syntax::Syntax,
-    Ast, Expander, Symbol,
+    ast::{syntax::Syntax, Ast, Pair, Symbol},
+    evaluator::Evaluator,
+    list,
 };
+
+use super::{binding::Binding, r#match::match_syntax, Expander};
 
 impl Expander {
     pub fn compile(&mut self, s: Ast) -> Result<Ast, String> {

@@ -1,18 +1,30 @@
+pub mod scope;
+pub mod syntax;
+use scope::Scope;
+use syntax::Syntax;
+
 use std::{
     collections::BTreeSet,
     fmt::{self, Debug},
     rc::Rc,
 };
 
-use crate::{
-    evaluator::{self, Env},
-    scope::Scope,
-    syntax::Syntax,
-};
+use crate::evaluator::{Env, EnvRef, Evaluator};
+
+#[macro_export]
+macro_rules! list {
+    () => {$crate::ast::Ast::TheEmptyList};
+    ($car:expr $(,)?) => {
+        $crate::ast::Ast::Pair(Box::new($crate::ast::Pair($car, $crate::ast::Ast::TheEmptyList)))
+    };
+    ($car:expr, $($cdr:tt)+) => {
+        $crate::ast::Ast::Pair(Box::new($crate::ast::Pair($car, list!($($cdr)+))))
+    };
+}
 
 pub type AnalyzedResult = Result<Box<dyn AnalyzeFn>, String>;
 
-pub trait AnalyzeFn: Fn(evaluator::EnvRef) -> Result<Ast, String> {
+pub trait AnalyzeFn: Fn(EnvRef) -> Result<Ast, String> {
     fn clone_box<'a>(&self) -> Box<dyn 'a + AnalyzeFn>
     where
         Self: 'a;
@@ -20,7 +32,7 @@ pub trait AnalyzeFn: Fn(evaluator::EnvRef) -> Result<Ast, String> {
 
 impl<F> AnalyzeFn for F
 where
-    F: Fn(evaluator::EnvRef) -> Result<Ast, String> + Clone,
+    F: Fn(EnvRef) -> Result<Ast, String> + Clone,
 {
     fn clone_box<'a>(&self) -> Box<dyn 'a + AnalyzeFn>
     where
@@ -56,7 +68,7 @@ impl Function {
         match self {
             Self::Lambda(Lambda(body, env, params)) => {
                 let env = Env::extend_envoirnment(env.clone(), *params.clone(), args)?;
-                evaluator::Evaluator::eval_sequence(*body.clone(), env)
+                Evaluator::eval_sequence(*body.clone(), env)
             }
             Self::Primitive(p) => p(args),
         }
@@ -64,7 +76,7 @@ impl Function {
 }
 
 #[derive(Clone)]
-pub struct Lambda(pub Box<Ast>, pub evaluator::EnvRef, pub Box<Ast>);
+pub struct Lambda(pub Box<Ast>, pub EnvRef, pub Box<Ast>);
 
 impl PartialEq for Lambda {
     fn eq(&self, _other: &Self) -> bool {
