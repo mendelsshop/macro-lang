@@ -254,3 +254,79 @@ impl Reader {
         (str, input)
     }
 }
+
+#[cfg(test)]
+mod reader_tests {
+    use crate::{
+        ast::{Ast, Pair},
+        list,
+        reader::Reader,
+    };
+
+    #[test]
+    pub fn read_test_number() {
+        let mut reader = Reader("42.".to_string());
+        assert_eq!(reader.read(), Ok(Ast::Number(42.)))
+    }
+    #[test]
+    pub fn read_test_symbol() {
+        let mut reader = Reader("foo".to_string());
+        assert_eq!(reader.read(), Ok(Ast::Symbol("foo".into())))
+    }
+    #[test]
+    pub fn read_test_quote_symbol() {
+        let mut reader = Reader("'foo".to_string());
+        assert_eq!(
+            reader.read(),
+            Ok(list!(
+                Ast::Symbol("quote".into()),
+                Ast::Symbol("foo".into())
+            ))
+        )
+    }
+    #[test]
+    pub fn read_test_quote_empty() {
+        let mut reader = Reader("'".to_string());
+        assert!(reader.read().is_err(),)
+    }
+
+    #[test]
+    pub fn read_test_list() {
+        let mut reader = Reader("(foo 1)".to_string());
+        assert_eq!(
+            reader.read(),
+            Ok(list!(Ast::Symbol("foo".into()), Ast::Number(1.)))
+        )
+    }
+    #[test]
+    pub fn read_test_list_unpaired() {
+        let mut reader = Reader("( foo bar".to_string());
+        assert!(reader.read().is_err(),)
+    }
+    #[test]
+    pub fn read_test_pair() {
+        let mut reader = Reader("(foo . 1)".to_string());
+        assert_eq!(
+            reader.read(),
+            Ok(Ast::Pair(Box::new(Pair(
+                Ast::Symbol("foo".into()),
+                Ast::Number(1.)
+            ))))
+        )
+    }
+    #[test]
+    pub fn read_test_pair_unpaired() {
+        let mut reader = Reader("( foo . bar".to_string());
+        assert!(reader.read().is_err(),)
+    }
+    #[test]
+    pub fn read_test_pair_missing_cdr() {
+        let mut reader = Reader("( foo . )".to_string());
+        assert!(reader.read().is_err(),)
+    }
+    #[test]
+    pub fn read_test_pair_missing_cdr_unpaired() {
+        let mut reader = Reader("( foo .".to_string());
+        assert!(reader.read().is_err(),)
+    }
+}
