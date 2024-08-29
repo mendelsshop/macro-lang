@@ -267,27 +267,27 @@ mod reader_tests {
     #[test]
     pub fn read_test_number() {
         let mut reader = Reader("42".to_string());
-        assert_eq!(reader.read(), Ok(Ast::Number(42.)))
+        assert_eq!(reader.read(), Ok(Ast::Number(42.)));
     }
     #[test]
     pub fn read_test_float() {
         let mut reader = Reader("36.4".to_string());
-        assert_eq!(reader.read(), Ok(Ast::Number(36.4)))
+        assert_eq!(reader.read(), Ok(Ast::Number(36.4)));
     }
     #[test]
     pub fn read_test_symbol() {
         let mut reader = Reader("foo".to_string());
-        assert_eq!(reader.read(), Ok(Ast::Symbol("foo".into())))
+        assert_eq!(reader.read(), Ok(Ast::Symbol("foo".into())));
     }
     #[test]
     pub fn read_test_number_symbol() {
         let mut reader = Reader("1foo".to_string());
-        assert_eq!(reader.read(), Ok(Ast::Symbol("1foo".into())))
+        assert_eq!(reader.read(), Ok(Ast::Symbol("1foo".into())));
     }
     #[test]
     pub fn read_test_float_symbol() {
         let mut reader = Reader("1.5foo".to_string());
-        assert_eq!(reader.read(), Ok(Ast::Symbol("1.5foo".into())))
+        assert_eq!(reader.read(), Ok(Ast::Symbol("1.5foo".into())));
     }
     #[test]
     pub fn read_test_quote_symbol() {
@@ -298,12 +298,12 @@ mod reader_tests {
                 Ast::Symbol("quote".into()),
                 Ast::Symbol("foo".into())
             ))
-        )
+        );
     }
     #[test]
     pub fn read_test_quote_empty() {
         let mut reader = Reader("'".to_string());
-        assert!(reader.read().is_err(),)
+        assert!(reader.read().is_err(),);
     }
 
     #[test]
@@ -312,7 +312,7 @@ mod reader_tests {
         assert_eq!(
             reader.read(),
             Ok(list!(Ast::Symbol("foo".into()), Ast::Number(1.)))
-        )
+        );
     }
     #[test]
     pub fn read_test_nested_list() {
@@ -324,12 +324,12 @@ mod reader_tests {
                 list!(Ast::Symbol("def".into()), Ast::Number(1.)),
                 Ast::Number(23.),
             ))
-        )
+        );
     }
     #[test]
     pub fn read_test_list_unpaired() {
         let mut reader = Reader("( foo bar".to_string());
-        assert!(reader.read().is_err(),)
+        assert!(reader.read().is_err(),);
     }
     #[test]
     pub fn read_test_pair() {
@@ -340,22 +340,22 @@ mod reader_tests {
                 Ast::Symbol("foo".into()),
                 Ast::Number(1.)
             ))))
-        )
+        );
     }
     #[test]
     pub fn read_test_pair_unpaired() {
         let mut reader = Reader("( foo . bar".to_string());
-        assert!(reader.read().is_err(),)
+        assert!(reader.read().is_err(),);
     }
     #[test]
     pub fn read_test_pair_missing_cdr() {
         let mut reader = Reader("( foo . )".to_string());
-        assert!(reader.read().is_err(),)
+        assert!(reader.read().is_err(),);
     }
     #[test]
     pub fn read_test_pair_missing_cdr_unpaired() {
         let mut reader = Reader("( foo .".to_string());
-        assert!(reader.read().is_err(),)
+        assert!(reader.read().is_err(),);
     }
     #[test]
     pub fn read_test_quote_list() {
@@ -366,12 +366,12 @@ mod reader_tests {
                 Ast::Symbol("quote".into()),
                 list!(Ast::Number(1.), Ast::Symbol("foo".into()),)
             ))
-        )
+        );
     }
     #[test]
     pub fn read_test_list_quote_unpaired() {
         let mut reader = Reader("'( ab bar".to_string());
-        assert!(reader.read().is_err(),)
+        assert!(reader.read().is_err(),);
     }
     #[test]
     pub fn read_test_quote_pair() {
@@ -384,6 +384,6 @@ mod reader_tests {
                     Pair(Ast::Number(365.), Ast::Symbol("abc".into()),)
                 ))
             ))
-        )
+        );
     }
 }

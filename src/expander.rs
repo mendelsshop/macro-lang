@@ -17,9 +17,13 @@ use crate::{
 pub mod binding;
 mod compile;
 mod core;
+mod duplicate_check;
 pub mod expand;
+mod expand_context;
 mod expand_expr;
+mod expand_top_level;
 mod r#match;
+mod namespace;
 #[derive(Debug)]
 pub struct Expander {
     core_forms: HashMap<Rc<str>, CoreForm>,
