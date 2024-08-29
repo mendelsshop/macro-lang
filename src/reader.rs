@@ -143,6 +143,7 @@ impl Reader {
     // #[trace(format_enter = "", format_exit = "")]
     // parse symbol if not followed by space paren or comment
     // invariant Some('.') | Some(c) if c.is_ascci_digit() = input.peek()
+    // TODO: if number is immediatly followed by symbol combine into one symbol
     pub(crate) fn read_number(input: Input) -> ReaderInnerResult {
         let (first, mut input) = Self::read_digit(input);
         let (second, input) = {
@@ -162,8 +163,8 @@ impl Reader {
                 Err(e) => Err((e.to_string(), input)),
             },
 
-            (first, second, _) => {
-                let (last, input) = Self::read_symbol_inner(input);
+            (first, second, last) => {
+                println!("{first} {second} {last}");
                 Ok((
                     Ast::Symbol(Symbol(format!("{first}{second}{last}").into(), 0)),
                     input,
@@ -265,13 +266,28 @@ mod reader_tests {
 
     #[test]
     pub fn read_test_number() {
-        let mut reader = Reader("42.".to_string());
+        let mut reader = Reader("42".to_string());
         assert_eq!(reader.read(), Ok(Ast::Number(42.)))
+    }
+    #[test]
+    pub fn read_test_float() {
+        let mut reader = Reader("36.4".to_string());
+        assert_eq!(reader.read(), Ok(Ast::Number(36.4)))
     }
     #[test]
     pub fn read_test_symbol() {
         let mut reader = Reader("foo".to_string());
         assert_eq!(reader.read(), Ok(Ast::Symbol("foo".into())))
+    }
+    #[test]
+    pub fn read_test_number_symbol() {
+        let mut reader = Reader("1foo".to_string());
+        assert_eq!(reader.read(), Ok(Ast::Symbol("1foo".into())))
+    }
+    #[test]
+    pub fn read_test_float_symbol() {
+        let mut reader = Reader("1.5foo".to_string());
+        assert_eq!(reader.read(), Ok(Ast::Symbol("1.5foo".into())))
     }
     #[test]
     pub fn read_test_quote_symbol() {
@@ -296,6 +312,18 @@ mod reader_tests {
         assert_eq!(
             reader.read(),
             Ok(list!(Ast::Symbol("foo".into()), Ast::Number(1.)))
+        )
+    }
+    #[test]
+    pub fn read_test_nested_list() {
+        let mut reader = Reader("(bar (def 1) 23)".to_string());
+        assert_eq!(
+            reader.read(),
+            Ok(list!(
+                Ast::Symbol("bar".into()),
+                list!(Ast::Symbol("def".into()), Ast::Number(1.)),
+                Ast::Number(23.),
+            ))
         )
     }
     #[test]
@@ -328,5 +356,34 @@ mod reader_tests {
     pub fn read_test_pair_missing_cdr_unpaired() {
         let mut reader = Reader("( foo .".to_string());
         assert!(reader.read().is_err(),)
+    }
+    #[test]
+    pub fn read_test_quote_list() {
+        let mut reader = Reader("'(1 foo)".to_string());
+        assert_eq!(
+            reader.read(),
+            Ok(list!(
+                Ast::Symbol("quote".into()),
+                list!(Ast::Number(1.), Ast::Symbol("foo".into()),)
+            ))
+        )
+    }
+    #[test]
+    pub fn read_test_list_quote_unpaired() {
+        let mut reader = Reader("'( ab bar".to_string());
+        assert!(reader.read().is_err(),)
+    }
+    #[test]
+    pub fn read_test_quote_pair() {
+        let mut reader = Reader("'(365 . abc)".to_string());
+        assert_eq!(
+            reader.read(),
+            Ok(list!(
+                Ast::Symbol("quote".into()),
+                Ast::Pair(Box::new(
+                    Pair(Ast::Number(365.), Ast::Symbol("abc".into()),)
+                ))
+            ))
+        )
     }
 }
