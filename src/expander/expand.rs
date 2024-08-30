@@ -13,7 +13,7 @@ use super::{
 
 impl Expander {
     pub fn namespace_syntax_introduce<T: AdjustScope>(&self, s: T) -> T {
-        s.add_scope(self.core_scope)
+        s.add_scope(self.core_scope.clone())
     }
     //#[trace]
     pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
@@ -29,7 +29,7 @@ impl Expander {
                     s.clone(),
                     list!(
                         Ast::Symbol("quote".into()).datum_to_syntax(
-                            Some(BTreeSet::from([self.core_scope])),
+                            Some(BTreeSet::from([self.core_scope.clone()])),
                             None,
                             None
                         ),
@@ -43,7 +43,7 @@ impl Expander {
                 s.clone(),
                 list!(
                     Ast::Symbol("quote".into()).datum_to_syntax(
-                        Some(BTreeSet::from([self.core_scope])),
+                        Some(BTreeSet::from([self.core_scope.clone()])),
                         None,
                         None
                     ),
@@ -80,7 +80,7 @@ impl Expander {
 
     pub(crate) fn apply_transformer(&mut self, m: Function, s: Ast) -> Result<Ast, String> {
         let intro_scope = self.scope_creator.new_scope();
-        let intro_s = s.add_scope(intro_scope);
+        let intro_s = s.add_scope(intro_scope.clone());
         let transformed_s = m.apply(Ast::Pair(Box::new(Pair(intro_s, Ast::TheEmptyList))))?;
         if !matches!(transformed_s, Ast::Syntax(_)) {
             return Err(format!("transformer produced non syntax: {transformed_s}"));
@@ -138,7 +138,7 @@ impl Expander {
             s,
             Ast::Pair(Box::new(Pair(
                 Into::<Ast>::into("%app").datum_to_syntax(
-                    Some(BTreeSet::from([self.core_scope])),
+                    Some(BTreeSet::from([self.core_scope.clone()])),
                     None,
                     None,
                 ),

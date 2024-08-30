@@ -55,7 +55,7 @@ impl Expander {
         let mut this = Self {
             core_syntax: Syntax(
                 Ast::Boolean(false),
-                BTreeSet::from([core_scope]),
+                BTreeSet::from([core_scope.clone()]),
                 SourceLocation::default(),
                 Properties::new(),
             ),
@@ -76,7 +76,7 @@ impl Expander {
     }
 
     pub fn introduce<T: AdjustScope>(&self, s: T) -> T {
-        s.add_scope(self.core_scope)
+        s.add_scope(self.core_scope.clone())
     }
 
     //pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {

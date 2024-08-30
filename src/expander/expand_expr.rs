@@ -28,7 +28,7 @@ impl Expander {
         let ids = m("id".into()).ok_or("internal error".to_string())?;
         let ids = ids.map_pair(|term, base| match term {
             Ast::Syntax(id) => {
-                let id = id.add_scope(sc);
+                let id = id.add_scope(sc.clone());
                 Ok(Ast::Syntax(Box::new(id)))
             }
             Ast::TheEmptyList if base => Ok(Ast::TheEmptyList),
@@ -89,7 +89,7 @@ impl Expander {
                     let mut ids = ids?;
                     match current_id {
                         Ast::Syntax(id) if matches!(id.0, Ast::Symbol(_)) => {
-                            let id = id.add_scope(sc);
+                            let id = id.add_scope(sc.clone());
                             let id: Syntax<Symbol> = id.try_into()?;
                             ids.push(self.add_local_binding(id));
 

@@ -1,7 +1,12 @@
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![deny(static_mut_refs)]
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
-use std::io::{BufRead, BufReader, Write};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    io::{BufRead, BufReader, Write},
+    rc::Rc,
+};
 
 use ast::{scope::Scope, Ast, Symbol};
 use expander::{binding::CompileTimeEnvoirnment, Expander};
@@ -32,7 +37,7 @@ impl UniqueNumberManager {
     }
 
     fn new_scope(&mut self) -> Scope {
-        Scope(self.next())
+        Scope(self.next(), Rc::new(RefCell::new(HashMap::new())))
     }
 
     fn gen_sym(&mut self, name: impl ToString) -> Symbol {

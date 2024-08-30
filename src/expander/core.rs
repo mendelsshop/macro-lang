@@ -16,7 +16,7 @@ impl Expander {
         self.add_binding(
             Syntax(
                 sym.clone(),
-                BTreeSet::from([self.core_scope]),
+                BTreeSet::from([self.core_scope.clone()]),
                 SourceLocation::default(),
                 Properties::new(),
             ),

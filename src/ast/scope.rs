@@ -1,12 +1,39 @@
-use std::collections::BTreeSet;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet, HashMap},
+    rc::Rc,
+};
 
 use crate::expander::{binding::Binding, Expander};
 
 use super::{syntax::Syntax, Ast, Pair, Symbol};
 
 pub type ScopeSet = BTreeSet<Scope>;
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct Scope(pub usize);
+#[derive(Clone, PartialEq, Debug)]
+pub struct Scope(
+    pub usize,
+    pub Rc<RefCell<HashMap<Symbol, BTreeMap<ScopeSet, Binding>>>>,
+);
+
+impl Ord for Scope {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl Eq for Scope {}
+
+impl PartialOrd for Scope {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl std::hash::Hash for Scope {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
 pub trait AdjustScope: Sized {
     fn adjust_scope(self, other_scope: Scope, operation: fn(ScopeSet, Scope) -> ScopeSet) -> Self;
 
@@ -33,7 +60,7 @@ impl AdjustScope for Syntax<Ast> {
         operation: fn(ScopeSet, Scope) -> ScopeSet,
     ) -> Self {
         Self(
-            self.0.adjust_scope(other_scope_set, operation),
+            self.0.adjust_scope(other_scope_set.clone(), operation),
             operation(self.1, other_scope_set),
             self.2,
             self.3,
@@ -57,7 +84,7 @@ impl AdjustScope for Ast {
     ) -> Self {
         match self {
             Self::Pair(p) => Self::Pair(Box::new(Pair(
-                p.0.adjust_scope(other_scope, operation),
+                p.0.adjust_scope(other_scope.clone(), operation),
                 p.1.adjust_scope(other_scope, operation),
             ))),
             Self::Syntax(s) => Self::Syntax(Box::new(s.adjust_scope(other_scope, operation))),
@@ -67,7 +94,6 @@ impl AdjustScope for Ast {
 }
 
 impl Expander {
-    // we could take a plain syntax<symbol> here to
     pub fn add_binding(&mut self, id: Syntax<Symbol>, binding: Binding) {
         self.all_bindings.insert(id, binding);
     }
