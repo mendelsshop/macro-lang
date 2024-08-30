@@ -5,7 +5,10 @@ use std::{
 
 use binding::{Binding, CoreForm};
 
-use crate::ast::scope::AdjustScope;
+use crate::ast::{
+    scope::AdjustScope,
+    syntax::{Properties, SourceLocation},
+};
 use crate::{
     ast::scope::Scope,
     ast::{syntax::Syntax, Ast, Symbol},
@@ -50,7 +53,12 @@ impl Expander {
         let core_scope = scope_creator.new_scope();
         let variable = scope_creator.gen_sym("variable");
         let mut this = Self {
-            core_syntax: Syntax(Ast::Boolean(false), BTreeSet::from([core_scope])),
+            core_syntax: Syntax(
+                Ast::Boolean(false),
+                BTreeSet::from([core_scope]),
+                SourceLocation::default(),
+                Properties::new(),
+            ),
             scope_creator,
             core_scope,
             core_primitives: HashMap::new(),
@@ -1022,7 +1030,7 @@ mod tests {
     impl Expander {
         fn expand_expression(&mut self, e: Ast) -> Result<Ast, String> {
             self.expand(
-                self.namespace_syntax_introduce(e.datum_to_syntax(None)),
+                self.namespace_syntax_introduce(e.datum_to_syntax(None, None, None)),
                 CompileTimeEnvoirnment::new(),
             )
         }
@@ -1172,7 +1180,9 @@ mod tests {
         );
         assert!(expander
             .expand(
-                expander.namespace_syntax_introduce(reader.read().unwrap().datum_to_syntax(None)),
+                expander.namespace_syntax_introduce(
+                    reader.read().unwrap().datum_to_syntax(None, None, None)
+                ),
                 CompileTimeEnvoirnment::new()
             )
             .is_err_and(|e| e.contains("illegal use of syntax")));

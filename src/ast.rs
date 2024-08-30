@@ -1,7 +1,7 @@
 pub mod scope;
 pub mod syntax;
 use scope::Scope;
-use syntax::Syntax;
+use syntax::{Properties, Syntax};
 
 use std::{
     collections::BTreeSet,
@@ -48,7 +48,7 @@ impl<'a> Clone for Box<dyn 'a + AnalyzeFn> {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Function {
     Lambda(Lambda),
     Primitive(Primitive),
@@ -83,6 +83,7 @@ impl PartialEq for Lambda {
         false
     }
 }
+impl Eq for Lambda {}
 
 impl fmt::Debug for Lambda {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -260,6 +261,19 @@ impl Ast {
     pub(crate) fn scope_set(&self) -> Option<BTreeSet<Scope>> {
         match self {
             Self::Syntax(s) => Some(s.1.clone()),
+            _ => None,
+        }
+    }
+    pub(crate) fn properties(&self) -> Option<Properties> {
+        match self {
+            Self::Syntax(s) => Some(s.3.clone()),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn syntax_src_loc(&self) -> Option<syntax::SourceLocation> {
+        match self {
+            Self::Syntax(s) => Some(s.2.clone()),
             _ => None,
         }
     }

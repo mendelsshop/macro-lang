@@ -14,7 +14,8 @@ impl Ast {
         let Pair(syntax_object, Self::TheEmptyList) = *syntax_object else {
             Err(format!("arity error: expected 1 argument, got {arity}"))?
         };
-        Ok(syntax_object.datum_to_syntax(scopes.scope_set()))
+        // TODO: properties and location
+        Ok(syntax_object.datum_to_syntax(scopes.scope_set(), None, None))
     }
     pub fn primitive_syntax_to_datum(self) -> Result<Self, String> {
         let Self::Pair(e) = self else {

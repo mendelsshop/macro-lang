@@ -19,15 +19,20 @@ impl Expander {
     pub fn expand(&mut self, s: Ast, env: CompileTimeEnvoirnment) -> Result<Ast, String> {
         match s.clone() {
             Ast::Syntax(syntax) => match syntax.0 {
-                Ast::Symbol(symbol) => self.expand_identifier(Syntax(symbol, syntax.1), env),
+                Ast::Symbol(ref symbol) => {
+                    self.expand_identifier(syntax.with_ref(symbol.clone()), env)
+                }
                 Ast::Pair(p) if p.0.identifier() => self.expand_id_application_form(*p, s, env),
                 Ast::Pair(_) => self.expand_app(s, env),
                 Ast::TheEmptyList => self.expand_app(s, env),
                 _ => Ok(rebuild(
                     s.clone(),
                     list!(
-                        Ast::Symbol("quote".into())
-                            .datum_to_syntax(Some(BTreeSet::from([self.core_scope]))),
+                        Ast::Symbol("quote".into()).datum_to_syntax(
+                            Some(BTreeSet::from([self.core_scope])),
+                            None,
+                            None
+                        ),
                         s
                     ),
                 )),
@@ -37,8 +42,11 @@ impl Expander {
             _ => Ok(rebuild(
                 s.clone(),
                 list!(
-                    Ast::Symbol("quote".into())
-                        .datum_to_syntax(Some(BTreeSet::from([self.core_scope]))),
+                    Ast::Symbol("quote".into()).datum_to_syntax(
+                        Some(BTreeSet::from([self.core_scope])),
+                        None,
+                        None
+                    ),
                     s
                 ),
             )),
@@ -59,7 +67,7 @@ impl Expander {
         let Ast::Symbol(ref id) = id_syntax.0 else {
             unreachable!();
         };
-        let binding = self.resolve(&Syntax(id.clone(), id_syntax.1.clone()))?;
+        let binding = self.resolve(&id_syntax.with_ref(id.clone()))?;
         let t = env.lookup(binding, self.core_forms.clone(), self.variable.clone());
         match t {
             Err(_) => self.expand_app(s, env),
@@ -129,7 +137,11 @@ impl Expander {
         Ok(rebuild(
             s,
             Ast::Pair(Box::new(Pair(
-                Into::<Ast>::into("%app").datum_to_syntax(Some(BTreeSet::from([self.core_scope]))),
+                Into::<Ast>::into("%app").datum_to_syntax(
+                    Some(BTreeSet::from([self.core_scope])),
+                    None,
+                    None,
+                ),
                 Ast::Pair(Box::new(Pair(self.expand(rator, env)?, rand))),
             ))),
         ))
@@ -143,10 +155,14 @@ impl Expander {
         let t = env
             .lookup(binding, self.core_forms.clone(), self.variable.clone())
             .map_err(|_| format!("illegal use of syntax {s:?}"))?;
-        self.dispatch(t, Ast::Syntax(Box::new(Syntax(Ast::Symbol(s.0), s.1))), env)
+        self.dispatch(
+            t,
+            Ast::Syntax(Box::new(s.with_ref(Ast::Symbol(s.0.clone())))),
+            env,
+        )
     }
 }
 
 pub fn rebuild(s: Ast, rator: Ast) -> Ast {
-    rator.datum_to_syntax(s.scope_set())
+    rator.datum_to_syntax(s.scope_set(), s.syntax_src_loc(), s.properties())
 }

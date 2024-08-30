@@ -35,6 +35,8 @@ impl AdjustScope for Syntax<Ast> {
         Self(
             self.0.adjust_scope(other_scope_set, operation),
             operation(self.1, other_scope_set),
+            self.2,
+            self.3,
         )
     }
 }
@@ -44,7 +46,7 @@ impl AdjustScope for Syntax<Symbol> {
         other_scope_set: Scope,
         operation: fn(ScopeSet, Scope) -> ScopeSet,
     ) -> Self {
-        Self(self.0, operation(self.1, other_scope_set))
+        Self(self.0, operation(self.1, other_scope_set), self.2, self.3)
     }
 }
 impl AdjustScope for Ast {

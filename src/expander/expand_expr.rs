@@ -40,8 +40,7 @@ impl Expander {
             |term, base, env: Result<CompileTimeEnvoirnment, String>| match term {
                 Ast::Syntax(ref id_syntax) => {
                     if let Ast::Symbol(id) = &id_syntax.0 {
-                        let binding =
-                            self.add_local_binding(Syntax(id.clone(), id_syntax.1.clone()));
+                        let binding = self.add_local_binding(id_syntax.with_ref(id.clone()));
                         env.map(|env| {
                             env.extend(binding.clone(), Ast::Symbol(self.variable.clone()))
                         })

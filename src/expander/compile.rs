@@ -1,5 +1,5 @@
 use crate::{
-    ast::{syntax::Syntax, Ast, Pair, Symbol},
+    ast::{Ast, Pair, Symbol},
     evaluator::Evaluator,
     list,
 };
@@ -62,8 +62,9 @@ impl Expander {
                     _ => Err(format!("unrecognized core form {core_sym}")),
                 }
             }
-            Ast::Symbol(s1) => {
-                let b = self.resolve(&Syntax(s1, syntax.1))?;
+            Ast::Symbol(ref s1) => {
+                let with = syntax.with_ref(s1.clone());
+                let b = self.resolve(&with)?;
                 match b {
                     Binding::Variable(b) => Ok(Ast::Symbol(key_to_symbol(b.clone()))),
                     Binding::CoreBinding(s) => self
@@ -84,7 +85,7 @@ impl Expander {
         let Ast::Symbol(ref id) = s.0 else {
             return Err(format!("expected symbol found {id}"));
         };
-        let b = self.resolve(&Syntax(id.clone(), s.1.clone()))?;
+        let b = self.resolve(&s.with_ref(id.clone()))?;
         let Binding::Variable(s) = b else {
             return Err(format!("bad binding {b}"));
         };

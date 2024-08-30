@@ -87,7 +87,7 @@ fn main() {
             .inspect(|e| println!("after reader: {e}"))
             .and_then(|ast| {
                 expander.expand(
-                    expander.namespace_syntax_introduce(ast.datum_to_syntax(None)),
+                    expander.namespace_syntax_introduce(ast.datum_to_syntax(None, None, None)),
                     CompileTimeEnvoirnment::new(),
                 )
             })
