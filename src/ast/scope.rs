@@ -118,8 +118,22 @@ impl AdjustScope for Ast {
 }
 
 impl Expander {
-    pub fn add_binding(&mut self, id: Syntax<Symbol>, binding: Binding) {
-        self.all_bindings.insert(id, binding);
+    pub fn add_binding_in_scope(
+        scopes: BTreeSet<Scope>,
+        sym: Symbol,
+        binding: Binding,
+    ) -> Result<(), String> {
+        scopes.clone()
+            .into_iter()
+            .max()
+            .ok_or("cannot bind in empty scope set".to_string())
+            .map(|max_scope| {
+                let bindings = max_scope.1;
+                bindings.borrow_mut().entry(sym).or_insert(BTreeMap::new()).insert(scopes, binding);
+            })
+    }
+    pub fn add_binding( id: Syntax<Symbol>, binding: Binding) {
+        Self::add_binding_in_scope(id.1, id.0, binding);
     }
     pub fn resolve(&self, id: &Syntax<Symbol>) -> Result<&Binding, String> {
         let candidate_ids = self.find_all_matching_bindings(id);
