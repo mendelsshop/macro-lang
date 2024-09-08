@@ -9,11 +9,23 @@ use crate::expander::{binding::Binding, Expander};
 use super::{syntax::Syntax, Ast, Pair, Symbol};
 
 pub type ScopeSet = BTreeSet<Scope>;
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq)]
 pub struct Scope(
     pub usize,
     pub Rc<RefCell<HashMap<Symbol, BTreeMap<ScopeSet, Binding>>>>,
 );
+
+impl Scope {
+    pub fn scope_greater_than(&self, other: &Self) -> bool {
+        self > other
+    }
+}
+
+impl std::fmt::Debug for Scope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Scope").field(&self.0).finish()
+    }
+}
 
 impl Ord for Scope {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
@@ -51,6 +63,18 @@ pub trait AdjustScope: Sized {
             }
             scopes
         })
+    }
+
+    fn remove_scope(self, other_scope: Scope) -> Self {
+        self.adjust_scope(other_scope, |mut scopes, other_scope| {
+            scopes.remove(&other_scope);
+            scopes
+        })
+    }
+    fn remove_scopes(self, other_scopes: BTreeSet<Scope>) -> Self {
+        other_scopes
+            .into_iter()
+            .fold(self, AdjustScope::remove_scope)
     }
 }
 impl AdjustScope for Syntax<Ast> {
