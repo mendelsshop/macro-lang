@@ -4,6 +4,8 @@ use std::{
     rc::Rc,
 };
 
+use itertools::Itertools;
+
 use crate::expander::{binding::Binding, Expander};
 
 use super::{syntax::Syntax, Ast, Pair, Symbol};
@@ -123,46 +125,76 @@ impl Expander {
         sym: Symbol,
         binding: Binding,
     ) -> Result<(), String> {
-        scopes.clone()
+        scopes
+            .clone()
             .into_iter()
             .max()
             .ok_or("cannot bind in empty scope set".to_string())
             .map(|max_scope| {
                 let bindings = max_scope.1;
-                bindings.borrow_mut().entry(sym).or_insert(BTreeMap::new()).insert(scopes, binding);
+                bindings
+                    .borrow_mut()
+                    .entry(sym)
+                    .or_insert(BTreeMap::new())
+                    .insert(scopes, binding);
             })
     }
-    pub fn add_binding( id: Syntax<Symbol>, binding: Binding) {
+    pub fn add_binding(id: Syntax<Symbol>, binding: Binding) {
         Self::add_binding_in_scope(id.1, id.0, binding);
     }
-    pub fn resolve(&self, id: &Syntax<Symbol>) -> Result<&Binding, String> {
-        let candidate_ids = self.find_all_matching_bindings(id);
-        let id = candidate_ids
+    pub fn resolve(&self, id: &Syntax<Symbol>, exactly: bool) -> Result<Binding, String> {
+        let candidate_ids = self.find_all_matching_bindings(id, &id.1);
+        let max_candidate = candidate_ids
             .clone()
-            .max_by_key(|id| id.1.len())
+            .max_by_key(|id| id.0.len())
+            .filter(|max_candidate: &(BTreeSet<Scope>, Binding)| {
+                exactly || max_candidate.0.len() == id.1.len()
+            })
             .ok_or(format!("free variable {id:?}"))?;
-        if check_unambiguous(id, candidate_ids) {
-            self.all_bindings
-                .get(id)
-                .ok_or(format!("free variable {}", id.0 .0))
+        if check_unambiguous(&max_candidate, candidate_ids) {
+            Ok(max_candidate.1)
         } else {
-            Err(format!("ambiguous binding {}", id.0 .0))
+            Err(format!("ambiguous binding {:?}", id))
         }
     }
+
+    //#[stable(feature = "iterator_flatten", since = "1.29.0")]
+    //impl<I, U> Clone for Flatten<I>
+    //where
+    //    I: Clone + Iterator<Item: IntoIterator<IntoIter = U, Item = U::Item>>,
+    //    U: Clone + Iterator,
+    //{
+    //    fn clone(&self) -> Self {
+    //        Flatten { inner: self.inner.clone() }
+    //    }
+    //}
     fn find_all_matching_bindings<'a>(
         &'a self,
         id: &'a Syntax<Symbol>,
-    ) -> impl Iterator<Item = &Syntax<Symbol>> + Clone + 'a {
-        self.all_bindings
-            .keys()
-            .filter(move |c_id| c_id.0 == id.0 && c_id.1.is_subset(&id.1))
+        scopes: &'a BTreeSet<Scope>,
+    ) -> impl Iterator<Item = (BTreeSet<Scope>, Binding)> + Clone + 'a {
+        all_bindings(scopes, id)
+            // hacky way to get it to be clonable
+            .map(|x| x.into_iter().collect_vec().into_iter())
+            .flatten()
+            .filter(move |c_id| scopes.is_subset(&c_id.0))
+            .map(|x| x.clone())
     }
+}
+
+fn all_bindings<'a>(
+    scopes: &'a BTreeSet<Scope>,
+    id: &'a Syntax<Symbol>,
+) -> impl Iterator<Item = BTreeMap<BTreeSet<Scope>, Binding>> + Clone + 'a {
+    scopes
+        .into_iter()
+        .filter_map(move |sc| sc.1.borrow().get(&id.0).cloned())
 }
 // TODO: return error if ambiguous
 // or maybe return error in resolve, instead of option
 fn check_unambiguous<'a>(
-    id: &Syntax<Symbol>,
-    mut candidate_ids: impl Iterator<Item = &'a Syntax<Symbol>>,
+    max_candidate: &(BTreeSet<Scope>, Binding),
+    mut candidate_ids: impl Iterator<Item = (BTreeSet<Scope>, Binding)>,
 ) -> bool {
-    candidate_ids.all(|c_id| c_id.1.is_subset(&id.1))
+    candidate_ids.all(|c_id| c_id.0.is_subset(&max_candidate.0))
 }
