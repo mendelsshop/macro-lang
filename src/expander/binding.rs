@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt, rc::Rc};
 
 use crate::ast::{syntax::Syntax, Ast, Symbol};
 
-use super::Expander;
+use super::{namespace::NameSpace, Expander};
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Binding {
@@ -61,9 +61,9 @@ impl CompileTimeEnvoirnment {
     pub fn lookup(
         &self,
         key: &Binding,
+        ns: NameSpace,
         // TODO: maybe core form can get their own type
-        core_forms: HashMap<Rc<str>, CoreForm>,
-        variable: Symbol,
+        id: Symbol,
     ) -> Result<CompileTimeBinding, String> {
         match key {
             Binding::Variable(key) => self
@@ -72,23 +72,23 @@ impl CompileTimeEnvoirnment {
                 .cloned()
                 .map(CompileTimeBinding::Regular)
                 .ok_or(format!("identifier used out of context: {key}")),
-            Binding::CoreBinding(core) => Ok(core_forms
-                .get(core)
-                .map_or(CompileTimeBinding::Regular(Ast::Symbol(variable)), |f| {
-                    CompileTimeBinding::CoreForm(*f)
-                })),
+            Binding::CoreBinding(core) => Ok(ns
+                .transformers
+                .get(&core.clone().into())
+                .cloned()
+                .unwrap_or(CompileTimeBinding::Regular(Ast::Symbol(id)))),
         }
     }
 }
 impl Expander {
     pub fn free_identifier(&self, a: Syntax<Symbol>, b: Syntax<Symbol>) -> Result<bool, String> {
-        let ab = self.resolve(&a)?;
-        let bb = self.resolve(&b)?;
+        let ab = self.resolve(&a, false)?;
+        let bb = self.resolve(&b, false)?;
         Ok(ab == bb)
     }
     pub fn add_local_binding(&mut self, id: Syntax<Symbol>) -> Symbol {
         let symbol = self.scope_creator.gen_sym(&id.0 .0);
-        self.add_binding(id, Binding::Variable(symbol.clone()));
+        Self::add_binding(id, Binding::Variable(symbol.clone()));
         symbol
     }
 }

@@ -158,16 +158,6 @@ impl Expander {
         }
     }
 
-    //#[stable(feature = "iterator_flatten", since = "1.29.0")]
-    //impl<I, U> Clone for Flatten<I>
-    //where
-    //    I: Clone + Iterator<Item: IntoIterator<IntoIter = U, Item = U::Item>>,
-    //    U: Clone + Iterator,
-    //{
-    //    fn clone(&self) -> Self {
-    //        Flatten { inner: self.inner.clone() }
-    //    }
-    //}
     fn find_all_matching_bindings<'a>(
         &'a self,
         id: &'a Syntax<Symbol>,
