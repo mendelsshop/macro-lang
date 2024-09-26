@@ -142,6 +142,7 @@ impl Expander {
     pub fn add_binding(id: Syntax<Symbol>, binding: Binding) {
         Self::add_binding_in_scope(id.1, id.0, binding);
     }
+    /// exactly by default should be false
     pub fn resolve(&self, id: &Syntax<Symbol>, exactly: bool) -> Result<Binding, String> {
         let candidate_ids = self.find_all_matching_bindings(id, &id.1);
         let max_candidate = candidate_ids
