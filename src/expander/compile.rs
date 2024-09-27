@@ -4,10 +4,11 @@ use crate::{
     list,
 };
 
-use super::{binding::Binding, r#match::match_syntax, Expander};
+use super::{binding::Binding, namespace::NameSpace, r#match::match_syntax, Expander};
 
 impl Expander {
-    pub fn compile(&mut self, s: Ast) -> Result<Ast, String> {
+    pub fn compile(&self, s: Ast, ns: &NameSpace) -> Result<Ast, String> {
+        let compile = |s| self.compile(s, ns);
         let Ast::Syntax(syntax) = s.clone() else {
             panic!()
         };
@@ -31,9 +32,10 @@ impl Expander {
                         Ok(list!(
                             "lambda".into(),
                             formals.map(|id| self.local_symbol(id).map(Ast::Symbol))?,
-                            self.compile(body)?
+                            compile(body)?
                         ))
                     }
+                    "case-lambda" => todo!(),
                     "%app" => {
                         let m = match_syntax(
                             s,
@@ -44,8 +46,13 @@ impl Expander {
                         let l = m("rest".into()).ok_or("internal error")?.list();
                         m("rest".into())
                             .ok_or("internal error")?
-                            .map(|s| self.compile(s))
+                            .map(|s| compile(s))
                     }
+                    "if" => todo!(),
+                    "with-continuation-mark" => todo!(),
+                    "begin" | "begin0" => todo!(),
+                    "set!" => todo!(),
+                    "let-values" => todo!(),
                     "quote" => {
                         let m = match_syntax(s, list!("quote".into(), "datum".into()))?;
                         m("datum".into())
@@ -64,12 +71,12 @@ impl Expander {
             }
             Ast::Symbol(ref s1) => {
                 let with = syntax.with_ref(s1.clone());
-                let b = self.resolve(&with)?;
+                let b = self.resolve(&with, false)?;
                 match b {
                     Binding::Variable(b) => Ok(Ast::Symbol(key_to_symbol(b.clone()))),
-                    Binding::CoreBinding(s) => self
-                        .core_primitives
-                        .get(s)
+                    Binding::CoreBinding(s) => ns
+                        .variables
+                        .get(&s.clone().into())
                         .ok_or(format!("missing core bindig for primitive {s}"))
                         .cloned(),
                 }
@@ -85,7 +92,7 @@ impl Expander {
         let Ast::Symbol(ref id) = s.0 else {
             return Err(format!("expected symbol found {id}"));
         };
-        let b = self.resolve(&s.with_ref(id.clone()))?;
+        let b = self.resolve(&s.with_ref(id.clone()), false)?;
         let Binding::Variable(s) = b else {
             return Err(format!("bad binding {b}"));
         };
