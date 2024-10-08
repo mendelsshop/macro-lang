@@ -48,7 +48,7 @@ impl Expander {
         );
     }
 
-    pub fn core_form_symbol(& self, s: Ast) -> Result<Rc<str>, String> {
+    pub fn core_form_symbol(&self, s: Ast) -> Result<Rc<str>, String> {
         try_match_syntax(
             s,
             Ast::Pair(Box::new(Pair(

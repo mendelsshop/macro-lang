@@ -17,6 +17,13 @@ macro_rules! list {
     ($car:expr $(,)?) => {
         $crate::ast::Ast::Pair(Box::new($crate::ast::Pair($car, $crate::ast::Ast::TheEmptyList)))
     };
+
+
+
+    ($car:expr; $cdr:expr) => {
+        $crate::ast::Ast::Pair(Box::new($crate::ast::Pair($car, $cdr)))
+    };
+
     ($car:expr, $($cdr:tt)+) => {
         $crate::ast::Ast::Pair(Box::new($crate::ast::Pair($car, list!($($cdr)+))))
     };

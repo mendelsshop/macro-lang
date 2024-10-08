@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::{
     ast::{Ast, Pair, Symbol},
     evaluator::Evaluator,
@@ -21,21 +23,32 @@ impl Expander {
                     "lambda" => {
                         let m = match_syntax(
                             s,
-                            list!(
-                                "lambda".into(),
-                                list!("id".into(), "...".into(),),
-                                "body".into()
-                            ),
+                            list!("lambda".into(), "formals".into(), "body".into()),
                         )?;
-                        let formals = m("id".into()).ok_or("internal error")?;
-                        let body = m("body".into()).ok_or("internal error")?;
-                        Ok(list!(
-                            "lambda".into(),
-                            formals.map(|id| self.local_symbol(id).map(Ast::Symbol))?,
-                            compile(body)?
-                        ))
+                        self.compile_lambda(
+                            m("formals".into()).ok_or("internal error")?,
+                            m("body".into()).ok_or("internal error")?,
+                            ns,
+                        )
+                        .map(|body| list!("lambda".into(); body))
                     }
-                    "case-lambda" => todo!(),
+                    "case-lambda" => {
+                        // TODO: better tools to iterate over two/multiple things at once
+                        //let m = match_syntax(s, list!("case-lambda".into(), list!("formals".into(), "body".into()), "...".into()))?;
+                        //let formals = m("formals".into()).ok_or("internal error")?;
+                        //let bodies = m("body".into()).ok_or("internal error")?;
+                        let m = match_syntax(
+                            s,
+                            list!("case-lambda".into(), "case".into(), "...".into()),
+                        )?;
+                        let cases = m("case".into()).ok_or("internal error")?.map(|case| {
+                            let m = match_syntax(case, list!("formals".into(), "body".into()))?;
+                            let formals = m("formals".into()).ok_or("internal error")?;
+                            let body = m("body".into()).ok_or("internal error")?;
+                            self.compile_lambda(formals, body, ns)
+                        });
+                        cases.map(|cases| list!("case-lambda".into(); cases))
+                    }
                     "%app" => {
                         let m = match_syntax(
                             s,
@@ -44,15 +57,67 @@ impl Expander {
                             Ast::Pair(Box::new(Pair("%app".into(), "rest".into()))),
                         )?;
                         let l = m("rest".into()).ok_or("internal error")?.list();
-                        m("rest".into())
-                            .ok_or("internal error")?
-                            .map(|s| compile(s))
+                        m("rest".into()).ok_or("internal error")?.map(compile)
                     }
-                    "if" => todo!(),
-                    "with-continuation-mark" => todo!(),
-                    "begin" | "begin0" => todo!(),
-                    "set!" => todo!(),
-                    "let-values" => todo!(),
+                    "if" => {
+                        let m = match_syntax(
+                            s,
+                            list!("if".into(), "test".into(), "then".into(), "else".into()),
+                        )?;
+                        Ok(list!(
+                            "if".into(),
+                            m("test".into())
+                                .ok_or("internal error".to_string())
+                                .and_then(compile)?,
+                            m("then".into())
+                                .ok_or("internal error".to_string())
+                                .and_then(compile)?,
+                            m("else".into())
+                                .ok_or("internal error".to_string())
+                                .and_then(compile)?,
+                        ))
+                    }
+
+                    "with-continuation-mark" => {
+                        let m = match_syntax(
+                            s,
+                            // TODO: should this match with-continuation-mark as opposed to if?
+                            list!("if".into(), "key".into(), "val".into(), "body".into()),
+                        )?;
+                        Ok(list!(
+                            "with-continuation-mark".into(),
+                            m("key".into())
+                                .ok_or("internal error".to_string())
+                                .and_then(compile)?,
+                            m("val".into())
+                                .ok_or("internal error".to_string())
+                                .and_then(compile)?,
+                            m("body".into())
+                                .ok_or("internal error".to_string())
+                                .and_then(compile)?,
+                        ))
+                    }
+                    // maybe begin0 is if its gen-symed (at a sybmol level)
+                    "begin" | "begin0" => {
+                        let m = match_syntax(s, list!("begin".into(), "e".into(), "...+".into()))?;
+                        m("e".into())
+                            .ok_or("internal error")?
+                            .map(compile)
+                            .map(|e| list!(Ast::Symbol(core_sym.into()); e ))
+                    }
+                    "set!" => {
+                        let m = match_syntax(s, list!("set!".into(), "id".into(), "value".into()))?;
+                        Ok(list!(
+                            "set!".into(),
+                            m("id".into())
+                                .ok_or("internal error".to_string())
+                                .and_then(compile)?,
+                            m("value".into())
+                                .ok_or("internal error".to_string())
+                                .and_then(compile)?,
+                        ))
+                    }
+                    "let-values" | "letrec-values" => self.compile_let(core_sym, s, ns),
                     "quote" => {
                         let m = match_syntax(s, list!("quote".into(), "datum".into()))?;
                         m("datum".into())
@@ -85,6 +150,17 @@ impl Expander {
         }
     }
 
+    fn compile_lambda(&self, formals: Ast, body: Ast, ns: &NameSpace) -> Result<Ast, String> {
+        Ok(list!(
+            "lambda".into(),
+            formals.map(|id| self.local_symbol(id).map(Ast::Symbol))?,
+            self.compile(body, ns)?
+        ))
+    }
+
+    fn compile_let(&self, core_sym: Rc<str>, s: Ast, ns: &NameSpace) -> Result<Ast, String> {
+        todo!()
+    }
     fn local_symbol(&self, id: Ast) -> Result<Symbol, String> {
         let Ast::Syntax(ref s) = id else {
             return Err(format!("expected symbol found {id}"));
