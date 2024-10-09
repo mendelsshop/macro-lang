@@ -193,6 +193,21 @@ impl Ast {
             _ => 0,
         }
     }
+    pub fn map2(
+        a: Ast,
+        b: Ast,
+        mut f: impl FnMut(Self, Self) -> Result<Self, String>,
+    ) -> Result<Self, String> {
+        match (a, b) {
+            (Self::Pair(p), Self::Pair(p1)) => {
+                let car = f(p.0.clone(), p1.0.clone())?;
+                let cdr = Self::map2(p.1, p1.1, f)?;
+                Ok(Self::Pair(Box::new(Pair(car, cdr))))
+            }
+            (Self::TheEmptyList, Self::TheEmptyList) => Ok(Self::TheEmptyList),
+            bad => Err(format!("cannot map {} and {}", bad.0, bad.1)),
+        }
+    }
     pub fn map(&self, f: impl FnMut(Self) -> Result<Self, String>) -> Result<Self, String> {
         match self {
             Self::Pair(p) => {

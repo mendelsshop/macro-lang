@@ -159,7 +159,36 @@ impl Expander {
     }
 
     fn compile_let(&self, core_sym: Rc<str>, s: Ast, ns: &NameSpace) -> Result<Ast, String> {
-        todo!()
+        let rec = &*core_sym == "letrec-values";
+        let m = match_syntax(
+            s,
+            list!(
+                "let-values".into(),
+                list!(
+                    list!(list!("id".into(), "...".into()), "rhs".into()),
+                    "...".into()
+                ),
+                "body".into()
+            ),
+        )?;
+        let idss = m("id".into()).ok_or("internal error")?;
+        Ast::map2(
+            idss,
+            m("rhs".into()).ok_or("internal error")?,
+            |ids, rhs| {
+                ids.map(|id| {
+                    self.local_symbol(id)
+                        .map(Ast::Symbol)
+                        .and_then(|ids| self.compile(rhs.clone(), ns).map(|rhs| list!(ids, rhs)))
+                })
+            },
+        )
+        .and_then(|signature| {
+            m("body".into())
+                .ok_or("internal error".to_string())
+                .and_then(|body| self.compile(body, ns))
+                .map(|body| list!(Ast::Symbol(core_sym.into()), signature, body))
+        })
     }
     fn local_symbol(&self, id: Ast) -> Result<Symbol, String> {
         let Ast::Syntax(ref s) = id else {
