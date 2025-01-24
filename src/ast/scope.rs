@@ -6,18 +6,36 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::expander::{binding::Binding, Expander};
+use crate::expander::{binding::Binding, phase::Phase, Expander};
 
 use super::{syntax::Syntax, Ast, Pair, Symbol};
 
 pub type ScopeSet = BTreeSet<Scope>;
 #[derive(Clone, PartialEq)]
-pub struct Scope(
+pub struct ScopeData(
     pub usize,
     pub Rc<RefCell<HashMap<Symbol, BTreeMap<ScopeSet, Binding>>>>,
 );
 
-impl std::fmt::Debug for Scope {
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
+pub enum Scope {
+    Simple(ScopeData),
+    Representative(ScopeData, MultiScope, Phase),
+    ShiftedMultiScope(Phase, MultiScope),
+}
+impl Scope {
+    pub fn generalize_scope(self) -> Self {
+        match self {
+            Scope::Representative(_, scope, phase) => Scope::ShiftedMultiScope(phase, scope),
+            _ => self,
+        }
+    }
+}
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
+pub struct MultiScope(ScopeSet);
+pub struct ShiftedMultiScope(Phase, MultiScope);
+
+impl std::fmt::Debug for ScopeData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Scope")
             .field(&self.0)
@@ -32,21 +50,21 @@ impl Scope {
     }
 }
 
-impl Ord for Scope {
+impl Ord for ScopeData {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.0.cmp(&other.0)
     }
 }
 
-impl Eq for Scope {}
+impl Eq for ScopeData {}
 
-impl PartialOrd for Scope {
+impl PartialOrd for ScopeData {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.0.partial_cmp(&other.0)
     }
 }
 
-impl std::hash::Hash for Scope {
+impl std::hash::Hash for ScopeData {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.hash(state);
     }
@@ -90,9 +108,18 @@ impl AdjustScope for Syntax<Ast> {
     ) -> Self {
         Self(
             self.0.adjust_scope(other_scope_set.clone(), operation),
-            operation(self.1, other_scope_set),
-            self.2,
+            if let Scope::ShiftedMultiScope(_, _) = other_scope_set {
+                self.1
+            } else {
+                operation(self.1, other_scope_set.clone())
+            },
+            if let Scope::ShiftedMultiScope(_, _) = other_scope_set {
+                operation(self.2, other_scope_set.clone())
+            } else {
+                self.2
+            },
             self.3,
+            self.4,
         )
     }
 }
@@ -102,7 +129,21 @@ impl AdjustScope for Syntax<Symbol> {
         other_scope_set: Scope,
         operation: fn(ScopeSet, Scope) -> ScopeSet,
     ) -> Self {
-        Self(self.0, operation(self.1, other_scope_set), self.2, self.3)
+        Self(
+            self.0,
+            if let Scope::ShiftedMultiScope(_, _) = other_scope_set {
+                self.1
+            } else {
+                operation(self.1, other_scope_set.clone())
+            },
+            if let Scope::ShiftedMultiScope(_, _) = other_scope_set {
+                operation(self.2, other_scope_set.clone())
+            } else {
+                self.2
+            },
+            self.3,
+            self.4,
+        )
     }
 }
 impl AdjustScope for Ast {
@@ -142,11 +183,16 @@ impl Expander {
                     .insert(scopes, binding);
             })
     }
-    pub fn add_binding(id: Syntax<Symbol>, binding: Binding) -> Result<(), String> {
+    pub fn add_binding(id: Syntax<Symbol>, phase: Phase, binding: Binding) -> Result<(), String> {
         Self::add_binding_in_scope(id.1, id.0, binding)
     }
     /// exactly by default should be false
-    pub fn resolve(&self, id: &Syntax<Symbol>, exactly: bool) -> Result<Binding, String> {
+    pub fn resolve(
+        &self,
+        id: &Syntax<Symbol>,
+        phase: Phase,
+        exactly: bool,
+    ) -> Result<Binding, String> {
         let candidate_ids = self.find_all_matching_bindings(id, &id.1);
         let max_candidate = candidate_ids
             .clone()

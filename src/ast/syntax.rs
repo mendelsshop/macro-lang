@@ -19,7 +19,13 @@ pub struct SourceLocation {
     column: u32,
 }
 #[derive(Clone, PartialEq)]
-pub struct Syntax<T>(pub T, pub ScopeSet, pub SourceLocation, pub Properties);
+pub struct Syntax<T>(
+    pub T,
+    pub ScopeSet,
+    pub ScopeSet,
+    pub SourceLocation,
+    pub Properties,
+);
 
 impl<T: Debug> Debug for Syntax<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -33,10 +39,16 @@ impl<T: Debug> Debug for Syntax<T> {
 impl<T> Syntax<T> {
     // TODO: make with take &self so we only need to clone properties srcloc scopes
     pub fn with<U>(self, other: U) -> Syntax<U> {
-        Syntax(other, self.1, self.2, self.3)
+        Syntax(other, self.1, self.2, self.3, self.4)
     }
     pub fn with_ref<U>(&self, other: U) -> Syntax<U> {
-        Syntax(other, self.1.clone(), self.2.clone(), self.3.clone())
+        Syntax(
+            other,
+            self.1.clone(),
+            self.2.clone(),
+            self.3.clone(),
+            self.4.clone(),
+        )
     }
 }
 impl<T: fmt::Display> fmt::Display for Syntax<T> {
@@ -65,7 +77,8 @@ impl TryFrom<Ast> for Syntax<Symbol> {
     }
 }
 
-const EMPTY_SCOPE: BTreeSet<Scope> = ScopeSet::new();
+const EMPTY_SCOPES: BTreeSet<Scope> = ScopeSet::new();
+const EMPTY_SHIFTED_MULTI_SCOPES: ScopeSet = ScopeSet::new();
 const EMPTY_PROPERTY: Properties = BTreeMap::new();
 const fn empty_srcloc() -> SourceLocation {
     SourceLocation {
@@ -77,7 +90,8 @@ const fn empty_srcloc() -> SourceLocation {
 const fn empty_syntax() -> Syntax<Ast> {
     Syntax(
         Ast::Boolean(false),
-        EMPTY_SCOPE,
+        EMPTY_SCOPES,
+        EMPTY_SHIFTED_MULTI_SCOPES,
         empty_srcloc(),
         EMPTY_PROPERTY,
     )
@@ -99,6 +113,7 @@ impl Ast {
     pub fn datum_to_syntax(
         self,
         scopes: Option<ScopeSet>,
+        shifted_multi_scopes: Option<ScopeSet>,
         srcloc: Option<SourceLocation>,
         properties: Option<Properties>,
     ) -> Self {
@@ -106,6 +121,7 @@ impl Ast {
             Self::Syntax(Box::new(Syntax(
                 e,
                 scopes.clone().unwrap_or_default(),
+                shifted_multi_scopes.clone().unwrap_or_default(),
                 srcloc.clone().unwrap_or_default(),
                 properties.clone().unwrap_or_default(),
             )))
@@ -114,15 +130,28 @@ impl Ast {
             Self::Syntax(_) => self,
             _ if self.list() => wrap(
                 self.map(|e| {
-                    Ok(e.datum_to_syntax(scopes.clone(), srcloc.clone(), properties.clone()))
+                    Ok(e.datum_to_syntax(
+                        scopes.clone(),
+                        shifted_multi_scopes.clone(),
+                        srcloc.clone(),
+                        properties.clone(),
+                    ))
                 })
                 .unwrap(),
             ),
             Self::Pair(pair) => wrap(Self::Pair(Box::new(Pair(
-                pair.0
-                    .datum_to_syntax(scopes.clone(), srcloc.clone(), properties.clone()),
-                pair.1
-                    .datum_to_syntax(scopes.clone(), srcloc.clone(), properties.clone()),
+                pair.0.datum_to_syntax(
+                    scopes.clone(),
+                    shifted_multi_scopes.clone(),
+                    srcloc.clone(),
+                    properties.clone(),
+                ),
+                pair.1.datum_to_syntax(
+                    scopes.clone(),
+                    shifted_multi_scopes.clone(),
+                    srcloc.clone(),
+                    properties.clone(),
+                ),
             )))),
             _ => wrap(self),
         }
@@ -144,7 +173,13 @@ impl Ast {
 impl<T> Syntax<T> {
     #[must_use]
     pub const fn new(expr: T) -> Self {
-        Self(expr, EMPTY_SCOPE, empty_srcloc(), EMPTY_PROPERTY)
+        Self(
+            expr,
+            EMPTY_SCOPES,
+            EMPTY_SHIFTED_MULTI_SCOPES,
+            empty_srcloc(),
+            EMPTY_PROPERTY,
+        )
     }
     pub fn bound_identifier(&self, other: &Self) -> bool
     where

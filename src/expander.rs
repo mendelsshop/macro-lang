@@ -32,6 +32,7 @@ mod expand_expr;
 mod expand_top_level;
 mod r#match;
 mod namespace;
+pub mod phase;
 pub struct Expander {
     core_forms: HashMap<Rc<str>, CoreForm>,
     core_primitives: HashMap<Rc<str>, Ast>,
