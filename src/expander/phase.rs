@@ -1,7 +1,7 @@
 use std::ops::{Add, Sub};
 
 #[derive(Hash, Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct Phase(isize);
+pub struct Phase(pub isize);
 
 impl Add for Phase {
     type Output = Self;

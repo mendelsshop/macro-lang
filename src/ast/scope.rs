@@ -1,6 +1,7 @@
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
+    hash::Hash,
     rc::Rc,
 };
 
@@ -17,23 +18,25 @@ pub struct ScopeData(
     pub usize,
     pub MutableMap<Symbol, BTreeMap<ScopeSet, Binding>>,
 );
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct Representative(pub ScopeData, pub MultiScope, pub Phase);
 
 pub enum ScopeNoMultiScope {
     Simple(ScopeData),
     Representative(Representative),
 }
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub enum Scope {
     Simple(ScopeData),
-    Representative(ScopeData, MultiScope, Phase),
+    Representative(Representative),
     ShiftedMultiScope(Phase, MultiScope),
 }
 impl Scope {
     pub fn generalize_scope(self) -> Self {
         match self {
-            Scope::Representative(_, scope, phase) => Scope::ShiftedMultiScope(phase, scope),
+            Scope::Representative(Representative(_, scope, phase)) => {
+                Scope::ShiftedMultiScope(phase, scope)
+            }
             _ => self,
         }
     }
@@ -63,7 +66,13 @@ impl Expander {
     }
 }
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct MultiScope(MutableMap<Phase, Representative>);
+pub struct MultiScope(pub(crate) MutableMap<Phase, Representative>);
+
+// refcell cannot be hashed correctly https://users.rust-lang.org/t/hashmap-keyed-by-rc-refcell/33210/14
+// anywhere where hashing matters the hashing will be done by other fields
+impl Hash for MultiScope {
+    fn hash<H: std::hash::Hasher>(&self, _: &mut H) {}
+}
 
 impl std::fmt::Debug for ScopeData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

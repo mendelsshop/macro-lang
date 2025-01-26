@@ -9,10 +9,10 @@ use std::{
 };
 
 use ast::{
-    scope::{MultiScope, Scope},
+    scope::{MultiScope, MutableMap, Scope},
     Ast, Symbol,
 };
-use expander::Expander;
+use expander::{phase, Expander};
 
 trace::init_depth_var!();
 
@@ -37,21 +37,13 @@ impl UniqueNumberManager {
     }
 
     fn new_scope(&mut self) -> Scope {
-        Scope(
-            self.next(),
-            Rc::new(RefCell::new(HashMap::new())),
-            ast::scope::ScopeData::Simple,
-        )
+        Scope::Simple(ast::scope::ScopeData(self.next(), MutableMap::default()))
     }
-    // fn new_multi_scope(&self) -> Scope {
-    //     Scope(
-    //         self.next(),
-    //         Rc::new(RefCell::new(HashMap::new())),
-    //         ast::scope::ScopeData::Simple,
-    //     )
-    // }
     fn gen_sym(&mut self, name: impl ToString) -> Symbol {
         Symbol(name.to_string().into(), self.next())
+    }
+    fn new_multi_scope() -> Scope {
+        Scope::ShiftedMultiScope(phase::Phase(0), MultiScope(MutableMap::default()))
     }
 }
 
