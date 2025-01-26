@@ -10,13 +10,20 @@ use crate::expander::{binding::Binding, phase::Phase, Expander};
 
 use super::{syntax::Syntax, Ast, Pair, Symbol};
 
+pub type MutableMap<K, V> = Rc<RefCell<BTreeMap<K, V>>>;
 pub type ScopeSet = BTreeSet<Scope>;
 #[derive(Clone, PartialEq)]
 pub struct ScopeData(
     pub usize,
-    pub Rc<RefCell<HashMap<Symbol, BTreeMap<ScopeSet, Binding>>>>,
+    pub MutableMap<Symbol, BTreeMap<ScopeSet, Binding>>,
 );
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
+pub struct Representative(pub ScopeData, pub MultiScope, pub Phase);
 
+pub enum ScopeNoMultiScope {
+    Simple(ScopeData),
+    Representative(Representative),
+}
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub enum Scope {
     Simple(ScopeData),
@@ -31,9 +38,32 @@ impl Scope {
         }
     }
 }
+impl Expander {
+    pub fn multi_scope_to_scope_at_phase(
+        &mut self,
+        multi_scope: MultiScope,
+        phase: Phase,
+    ) -> ScopeNoMultiScope {
+        ScopeNoMultiScope::Representative({
+            let this = multi_scope.0.borrow().get(&phase).cloned();
+            match this {
+                Some(x) => x,
+                None => {
+                    let s = Representative(
+                        ScopeData(self.scope_creator.next(), MutableMap::default()),
+                        multi_scope.clone(),
+                        phase.clone(),
+                    )
+                    .clone();
+                    multi_scope.0.borrow_mut().insert(phase, s.clone());
+                    s
+                }
+            }
+        })
+    }
+}
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
-pub struct MultiScope(ScopeSet);
-pub struct ShiftedMultiScope(Phase, MultiScope);
+pub struct MultiScope(MutableMap<Phase, Representative>);
 
 impl std::fmt::Debug for ScopeData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -73,14 +103,14 @@ pub trait AdjustScope: Sized {
     fn adjust_scope(self, other_scope: Scope, operation: fn(ScopeSet, Scope) -> ScopeSet) -> Self;
 
     fn add_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope, |mut scopes, other_scope| {
+        self.adjust_scope(other_scope.generalize_scope(), |mut scopes, other_scope| {
             scopes.insert(other_scope);
             scopes
         })
     }
 
     fn flip_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope, |mut scopes, other_scope| {
+        self.adjust_scope(other_scope.generalize_scope(), |mut scopes, other_scope| {
             if !scopes.remove(&other_scope) {
                 scopes.insert(other_scope);
             }
@@ -89,7 +119,7 @@ pub trait AdjustScope: Sized {
     }
 
     fn remove_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope, |mut scopes, other_scope| {
+        self.adjust_scope(other_scope.generalize_scope(), |mut scopes, other_scope| {
             scopes.remove(&other_scope);
             scopes
         })

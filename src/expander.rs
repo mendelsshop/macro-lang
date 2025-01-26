@@ -37,7 +37,7 @@ pub struct Expander {
     core_forms: HashMap<Rc<str>, CoreForm>,
     core_primitives: HashMap<Rc<str>, Ast>,
     core_scope: Scope,
-    scope_creator: UniqueNumberManager,
+    pub scope_creator: UniqueNumberManager,
     expand_time_env: EnvRef,
     run_time_env: EnvRef,
     core_syntax: Syntax<Ast>,
