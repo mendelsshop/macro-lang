@@ -5,10 +5,8 @@ use std::{
     fmt::Debug,
 };
 
-use super::{
-    scope::{Scope, ScopeSet},
-    Ast, Pair, Symbol,
-};
+use super::scope::{ScopeNoMultiScope, ShiftedMultiScope};
+use super::{Ast, Pair, Symbol};
 
 pub type Properties = BTreeMap<Symbol, Ast>;
 
@@ -21,8 +19,8 @@ pub struct SourceLocation {
 #[derive(Clone, PartialEq)]
 pub struct Syntax<T>(
     pub T,
-    pub ScopeSet,
-    pub ScopeSet,
+    pub BTreeSet<ScopeNoMultiScope>,
+    pub BTreeSet<ShiftedMultiScope>,
     pub SourceLocation,
     pub Properties,
 );
@@ -77,22 +75,20 @@ impl TryFrom<Ast> for Syntax<Symbol> {
     }
 }
 
-const EMPTY_SCOPES: BTreeSet<Scope> = ScopeSet::new();
-const EMPTY_SHIFTED_MULTI_SCOPES: ScopeSet = ScopeSet::new();
+const EMPTY_SCOPES: BTreeSet<ScopeNoMultiScope> = BTreeSet::new();
+const EMPTY_SHIFTED_MULTI_SCOPES: BTreeSet<ShiftedMultiScope> = BTreeSet::new();
 const EMPTY_PROPERTY: Properties = BTreeMap::new();
-const fn empty_srcloc() -> SourceLocation {
-    SourceLocation {
-        file: String::new(),
-        line: 0,
-        column: 0,
-    }
-}
+const EMPTY_SOURCE_LOCATION: SourceLocation = SourceLocation {
+    file: String::new(),
+    line: 0,
+    column: 0,
+};
 const fn empty_syntax() -> Syntax<Ast> {
     Syntax(
         Ast::Boolean(false),
         EMPTY_SCOPES,
         EMPTY_SHIFTED_MULTI_SCOPES,
-        empty_srcloc(),
+        EMPTY_SOURCE_LOCATION,
         EMPTY_PROPERTY,
     )
 }
@@ -112,8 +108,8 @@ impl Ast {
     #[must_use]
     pub fn datum_to_syntax(
         self,
-        scopes: Option<ScopeSet>,
-        shifted_multi_scopes: Option<ScopeSet>,
+        scopes: Option<BTreeSet<ScopeNoMultiScope>>,
+        shifted_multi_scopes: Option<BTreeSet<ShiftedMultiScope>>,
         srcloc: Option<SourceLocation>,
         properties: Option<Properties>,
     ) -> Self {
@@ -177,7 +173,7 @@ impl<T> Syntax<T> {
             expr,
             EMPTY_SCOPES,
             EMPTY_SHIFTED_MULTI_SCOPES,
-            empty_srcloc(),
+            EMPTY_SOURCE_LOCATION,
             EMPTY_PROPERTY,
         )
     }

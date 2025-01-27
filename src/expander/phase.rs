@@ -1,6 +1,6 @@
 use std::ops::{Add, Sub};
 
-#[derive(Hash, Clone, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Hash, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Phase(pub isize);
 
 impl Add for Phase {

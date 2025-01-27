@@ -1,15 +1,10 @@
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![deny(static_mut_refs)]
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    io::{BufRead, BufReader, Write},
-    rc::Rc,
-};
+use std::io::{BufRead, BufReader, Write};
 
 use ast::{
-    scope::{MultiScope, MutableMap, Scope},
+    scope::{MultiScope, MutableMap, Scope, ScopeNoMultiScope, ShiftedMultiScope},
     Ast, Symbol,
 };
 use expander::{phase, Expander};
@@ -37,13 +32,19 @@ impl UniqueNumberManager {
     }
 
     fn new_scope(&mut self) -> Scope {
-        Scope::Simple(ast::scope::ScopeData(self.next(), MutableMap::default()))
+        Scope::Simple(ScopeNoMultiScope::Simple(ast::scope::ScopeData(
+            self.next(),
+            MutableMap::default(),
+        )))
     }
     fn gen_sym(&mut self, name: impl ToString) -> Symbol {
         Symbol(name.to_string().into(), self.next())
     }
     fn new_multi_scope() -> Scope {
-        Scope::ShiftedMultiScope(phase::Phase(0), MultiScope(MutableMap::default()))
+        Scope::ShiftedMultiScope(ShiftedMultiScope(
+            phase::Phase(0),
+            MultiScope(MutableMap::default()),
+        ))
     }
 }
 

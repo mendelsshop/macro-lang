@@ -21,21 +21,24 @@ pub struct ScopeData(
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct Representative(pub ScopeData, pub MultiScope, pub Phase);
 
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub enum ScopeNoMultiScope {
     Simple(ScopeData),
     Representative(Representative),
 }
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct ShiftedMultiScope(pub Phase, pub MultiScope);
+
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub enum Scope {
-    Simple(ScopeData),
-    Representative(Representative),
-    ShiftedMultiScope(Phase, MultiScope),
+    Simple(ScopeNoMultiScope),
+    ShiftedMultiScope(ShiftedMultiScope),
 }
 impl Scope {
     pub fn generalize_scope(self) -> Self {
         match self {
-            Scope::Representative(Representative(_, scope, phase)) => {
-                Scope::ShiftedMultiScope(phase, scope)
+            Self::Simple(ScopeNoMultiScope::Representative(Representative(_, scope, phase))) => {
+                Scope::ShiftedMultiScope(ShiftedMultiScope(phase, scope))
             }
             _ => self,
         }
@@ -108,30 +111,58 @@ impl std::hash::Hash for ScopeData {
         self.0.hash(state);
     }
 }
+macro_rules! operation {
+    ($gensym:ident,|mut $set:ident, $scope:ident| $e:expr) => {{
+        #[derive(Clone, Copy)]
+        struct $gensym;
+        impl Operation for $gensym {
+            fn operation<T: Ord>(mut $set: BTreeSet<T>, $scope: T) -> BTreeSet<T> {
+                $e
+            }
+        }
+        $gensym
+    }};
+    (|mut $set:ident, $scope:ident|$e:expr) => {
+        gensym::gensym!(operation!(|mut $set, $scope| $e))
+    };
+}
+// to get around rust type system limits on being rank1 polymorphic
+pub trait Operation {
+    fn operation<T: Ord>(_: BTreeSet<T>, e: T) -> BTreeSet<T>;
+}
 pub trait AdjustScope: Sized {
-    fn adjust_scope(self, other_scope: Scope, operation: fn(ScopeSet, Scope) -> ScopeSet) -> Self;
+    fn adjust_scope<O: Operation + Copy>(self, other_scope: Scope, operation: O) -> Self;
 
     fn add_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope.generalize_scope(), |mut scopes, other_scope| {
-            scopes.insert(other_scope);
-            scopes
-        })
+        self.adjust_scope(
+            other_scope.generalize_scope(),
+            operation!(|mut scopes, other_scope| {
+                scopes.insert(other_scope);
+                scopes
+            }),
+        )
     }
 
     fn flip_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope.generalize_scope(), |mut scopes, other_scope| {
-            if !scopes.remove(&other_scope) {
-                scopes.insert(other_scope);
-            }
-            scopes
-        })
+        self.adjust_scope(
+            other_scope.generalize_scope(),
+            operation!(|mut scopes, other_scope| {
+                if !scopes.remove(&other_scope) {
+                    scopes.insert(other_scope);
+                }
+                scopes
+            }),
+        )
     }
 
     fn remove_scope(self, other_scope: Scope) -> Self {
-        self.adjust_scope(other_scope.generalize_scope(), |mut scopes, other_scope| {
-            scopes.remove(&other_scope);
-            scopes
-        })
+        self.adjust_scope(
+            other_scope.generalize_scope(),
+            operation!(|mut scopes, other_scope| {
+                scopes.remove(&other_scope);
+                scopes
+            }),
+        )
     }
     fn remove_scopes(self, other_scopes: BTreeSet<Scope>) -> Self {
         other_scopes
@@ -140,20 +171,15 @@ pub trait AdjustScope: Sized {
     }
 }
 impl AdjustScope for Syntax<Ast> {
-    fn adjust_scope(
-        self,
-        other_scope_set: Scope,
-        operation: fn(ScopeSet, Scope) -> ScopeSet,
-    ) -> Self {
+    fn adjust_scope<O: Operation + Copy>(self, other_scope_set: Scope, operation: O) -> Self {
         Self(
             self.0.adjust_scope(other_scope_set.clone(), operation),
-            if let Scope::ShiftedMultiScope(_, _) = other_scope_set {
-                self.1
-            } else {
-                operation(self.1, other_scope_set.clone())
+            match other_scope_set {
+                Scope::ShiftedMultiScope(ShiftedMultiScope(_, _)) => self.1,
+                Scope::Simple(ref s) => O::operation(self.1, s.clone()),
             },
-            if let Scope::ShiftedMultiScope(_, _) = other_scope_set {
-                operation(self.2, other_scope_set.clone())
+            if let Scope::ShiftedMultiScope(other_scope_set) = other_scope_set {
+                O::operation(self.2, other_scope_set)
             } else {
                 self.2
             },
@@ -163,20 +189,15 @@ impl AdjustScope for Syntax<Ast> {
     }
 }
 impl AdjustScope for Syntax<Symbol> {
-    fn adjust_scope(
-        self,
-        other_scope_set: Scope,
-        operation: fn(ScopeSet, Scope) -> ScopeSet,
-    ) -> Self {
+    fn adjust_scope<O: Operation + Copy>(self, other_scope_set: Scope, _: O) -> Self {
         Self(
             self.0,
-            if let Scope::ShiftedMultiScope(_, _) = other_scope_set {
-                self.1
-            } else {
-                operation(self.1, other_scope_set.clone())
+            match other_scope_set {
+                Scope::ShiftedMultiScope(ShiftedMultiScope(_, _)) => self.1,
+                Scope::Simple(ref s) => O::operation(self.1, s.clone()),
             },
-            if let Scope::ShiftedMultiScope(_, _) = other_scope_set {
-                operation(self.2, other_scope_set.clone())
+            if let Scope::ShiftedMultiScope(other_scope_set) = other_scope_set {
+                O::operation(self.2, other_scope_set)
             } else {
                 self.2
             },
@@ -186,11 +207,7 @@ impl AdjustScope for Syntax<Symbol> {
     }
 }
 impl AdjustScope for Ast {
-    fn adjust_scope(
-        self,
-        other_scope: Scope,
-        operation: fn(ScopeSet, Scope) -> BTreeSet<Scope>,
-    ) -> Self {
+    fn adjust_scope<O: Operation + Copy>(self, other_scope: Scope, operation: O) -> Self {
         match self {
             Self::Pair(p) => Self::Pair(Box::new(Pair(
                 p.0.adjust_scope(other_scope.clone(), operation),
@@ -203,6 +220,18 @@ impl AdjustScope for Ast {
 }
 
 impl Expander {
+    fn syntax_scope_set(&mut self, s: Ast, phase: Phase) -> BTreeSet<ScopeNoMultiScope> {
+        if let Ast::Syntax(s) = s {
+            let scopes = s.1;
+            let multi_scope = s.2;
+            multi_scope.into_iter().fold(scopes, |mut scopes, sms| {
+                scopes.insert(self.multi_scope_to_scope_at_phase(sms.1, sms.0 - phase));
+                scopes
+            })
+        } else {
+            BTreeSet::new()
+        }
+    }
     pub fn add_binding_in_scope(
         scopes: BTreeSet<Scope>,
         sym: Symbol,
@@ -252,7 +281,9 @@ impl Expander {
         id: &'a Syntax<Symbol>,
         scopes: &'a BTreeSet<Scope>,
     ) -> impl Iterator<Item = (BTreeSet<Scope>, Binding)> + Clone + 'a {
-        all_bindings(scopes, id)
+        scopes
+            .iter()
+            .filter_map(move |sc| sc.1.borrow().get(&id.0).cloned())
             // hacky way to get it to be clonable
             .flat_map(|x| x.into_iter().collect_vec())
             .filter(move |c_id| c_id.0.is_subset(scopes))
