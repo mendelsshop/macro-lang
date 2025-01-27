@@ -177,10 +177,4 @@ impl<T> Syntax<T> {
             EMPTY_PROPERTY,
         )
     }
-    pub fn bound_identifier(&self, other: &Self) -> bool
-    where
-        T: PartialEq,
-    {
-        self.0 == other.0 && self.1 == other.1
-    }
 }

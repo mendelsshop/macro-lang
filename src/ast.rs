@@ -262,10 +262,6 @@ impl From<&str> for Symbol {
     }
 }
 
-pub fn bound_identifier(a: Ast, b: Ast) -> bool {
-    matches!((a, b), (Ast::Syntax(a), Ast::Syntax(b)) if a == b)
-}
-
 impl fmt::Display for Ast {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
