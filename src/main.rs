@@ -40,7 +40,7 @@ impl UniqueNumberManager {
     fn gen_sym(&mut self, name: impl ToString) -> Symbol {
         Symbol(name.to_string().into(), self.next())
     }
-    fn new_multi_scope() -> Scope {
+    pub fn new_multi_scope() -> Scope {
         Scope::ShiftedMultiScope(ShiftedMultiScope(
             phase::Phase(0),
             MultiScope(MutableMap::default()),

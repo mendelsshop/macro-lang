@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell},
     collections::{BTreeMap, BTreeSet},
     hash::Hash,
     rc::Rc,
@@ -18,10 +18,10 @@ pub struct ScopeData(
     pub usize,
     pub MutableMap<Symbol, BTreeMap<BTreeSet<ScopeNoMultiScope>, Binding>>,
 );
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct Representative(pub ScopeData, pub MultiScope, pub Phase);
 
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub enum ScopeNoMultiScope {
     Simple(ScopeData),
     Representative(Representative),
@@ -33,11 +33,25 @@ impl ScopeNoMultiScope {
             Self::Representative(representative) => Rc::clone(&representative.0 .1),
         }
     }
+
+    pub fn get<'a>(
+        &'a self,
+        key: &'a Symbol,
+    ) -> Option<Ref<'a, BTreeMap<BTreeSet<ScopeNoMultiScope>, Binding>>> {
+        match self {
+            Self::Simple(scope_data) => {
+                Ref::filter_map(scope_data.1.borrow(), |map| map.get(key)).ok()
+            }
+            Self::Representative(representative) => {
+                Ref::filter_map(representative.0 .1.borrow(), |map| map.get(key)).ok()
+            }
+        }
+    }
 }
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct ShiftedMultiScope(pub Phase, pub MultiScope);
 
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub enum Scope {
     Simple(ScopeNoMultiScope),
     ShiftedMultiScope(ShiftedMultiScope),
@@ -55,7 +69,7 @@ impl Scope {
         self > other
     }
 }
-#[derive(Clone, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Debug)]
 pub struct MultiScope(pub(crate) MutableMap<Phase, Representative>);
 
 // refcell cannot be hashed correctly https://users.rust-lang.org/t/hashmap-keyed-by-rc-refcell/33210/14
@@ -238,7 +252,7 @@ impl Expander {
         &mut self,
         s: &Syntax<T>,
         phase: Phase,
-        k: impl FnOnce(BTreeSet<&ScopeNoMultiScope>) -> U,
+        k: impl FnOnce(&mut Self, BTreeSet<&ScopeNoMultiScope>) -> U,
     ) -> U {
         let multi_scopes: Vec<_> =
             s.2.iter()
@@ -246,7 +260,7 @@ impl Expander {
                 .collect();
         let scopes: BTreeSet<&ScopeNoMultiScope> =
             BTreeSet::from_iter(s.1.iter().chain(multi_scopes.iter()));
-        k(scopes)
+        k(self, scopes)
     }
     pub fn add_binding_in_scope(
         scopes: BTreeSet<ScopeNoMultiScope>,
@@ -304,12 +318,13 @@ impl Expander {
         &'a self,
         id: &'a Symbol,
         scopes: &'a BTreeSet<ScopeNoMultiScope>,
-    ) -> impl Iterator<Item = (BTreeSet<ScopeNoMultiScope>, Binding)> + Clone + 'a {
+    ) -> impl DoubleEndedIterator<Item = (BTreeSet<ScopeNoMultiScope>, Binding)> + use<'a> + Clone
+    {
         scopes
-            .iter()
-            .filter_map(move |sc| sc.scope_bindings().borrow().get(id).cloned())
+            .into_iter()
+            .filter_map(move |sc| sc.get(id))
             // hacky way to get it to be clonable
-            .flat_map(|x| x.into_iter().collect_vec())
+            .flat_map(|x| x.clone().into_iter().collect_vec())
             .filter(move |c_id| c_id.0.is_subset(scopes))
     }
 }
@@ -323,11 +338,18 @@ fn check_unambiguous<'a>(
     candidate_ids.all(|c_id| c_id.0.is_subset(&max_candidate.0))
 }
 impl Expander {
-    pub fn bound_identifier<T>(&mut self, syntax: Syntax<T>, other: Syntax<T>, phase: Phase) -> bool
+    pub fn bound_identifier<T>(
+        &mut self,
+        syntax: &Syntax<T>,
+        other: &Syntax<T>,
+        phase: Phase,
+    ) -> bool
     where
         T: PartialEq,
     {
         syntax.0 == other.0
-            && self.syntax_scope_set(syntax, phase) == self.syntax_scope_set(other, phase)
+            && self.syntax_scope_set_ref(syntax, phase, |this, scopes| {
+                this.syntax_scope_set_ref(other, phase, |_, other_scopes| scopes == other_scopes)
+            })
     }
 }
