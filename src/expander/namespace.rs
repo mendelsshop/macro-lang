@@ -1,4 +1,4 @@
-use std::{cell::Ref, collections::HashMap};
+use std::{cell::Ref, collections::HashMap, rc::Rc};
 
 use crate::ast::{
     scope::{MultiScope, MutableMap, Scope, ShiftedMultiScope},
@@ -8,10 +8,11 @@ use crate::ast::{
 use super::{
     binding::{Binding, CompileTimeBinding},
     phase::Phase,
+    Expander,
 };
 
 pub type ResolvedModuleName = Symbol;
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Module {
     pub self_name: ResolvedModuleName,
     // immutable
@@ -20,7 +21,19 @@ pub struct Module {
     pub provides: HashMap<Phase, HashMap<Symbol, Binding>>,
     pub min_phase_level: Phase,
     pub max_phase_level: Phase,
-    pub instantiate: fn(NameSpace, Phase, Phase),
+    pub instantiate: Rc<dyn Fn(NameSpace, Phase, Phase)>,
+}
+
+impl std::fmt::Debug for Module {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Module")
+            .field("self_name", &self.self_name)
+            .field("requires", &self.requires)
+            .field("provides", &self.provides)
+            .field("min_phase_level", &self.min_phase_level)
+            .field("max_phase_level", &self.max_phase_level)
+            .finish()
+    }
 }
 
 // TODO: some of these hashmaps are cells, do we have to use internal mutablitly with MutableMap?
@@ -31,7 +44,7 @@ impl Module {
         provides: HashMap<Phase, HashMap<Symbol, Binding>>,
         min_phase_level: Phase,
         max_phase_level: Phase,
-        instantiate: fn(NameSpace, Phase, Phase),
+        instantiate: Rc<dyn Fn(NameSpace, Phase, Phase)>,
     ) -> Self {
         Self {
             self_name,
@@ -103,7 +116,7 @@ impl NameSpace {
         }
     }
     /// as_submodule: defualts to false
-    fn declare_module(&self, name: ResolvedModuleName, m: Module, as_submodule: bool) {
+    pub fn declare_module(&self, name: ResolvedModuleName, m: Module, as_submodule: bool) {
         if as_submodule {
             self.submodule_declarations.clone()
         } else {
@@ -206,10 +219,10 @@ impl NameSpace {
             .entry(phase_level, |definitions| k(definitions.or_default()))
     }
 
-    fn namespace_set_variable(&self, phase_level: Phase, name: Symbol, value: Ast) {
+    pub fn namespace_set_variable(&self, phase_level: Phase, name: Symbol, value: Ast) {
         self.namespace_to_definitions(phase_level, |d| d.variables.insert(name, value));
     }
-    fn namespace_set_transformer(
+    pub fn namespace_set_transformer(
         &self,
         phase_level: Phase,
         name: Symbol,

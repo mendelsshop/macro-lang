@@ -7,13 +7,13 @@ use super::{expand_context::ExpandContext, namespace::NameSpace, phase::Phase, E
 pub type ModulePathIndex = Symbol;
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ModuleBinding {
-    from_module: ModulePathIndex,
-    from_phase: Phase,
-    from_symbol: Symbol,
-    norminal_from_module: ModulePathIndex,
-    norminal_from_phase: Phase,
-    norminal_from_symbol: Symbol,
-    norminal_require_phase: Phase,
+    pub from_module: ModulePathIndex,
+    pub from_phase: Phase,
+    pub from_symbol: Symbol,
+    pub norminal_from_module: ModulePathIndex,
+    pub norminal_from_phase: Phase,
+    pub norminal_from_symbol: Symbol,
+    pub norminal_require_phase: Phase,
 }
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Binding {
