@@ -167,8 +167,8 @@ impl NameSpace {
     ) -> Result<(), String> {
         self.namespace_module_instantiate(name, phase, Phase(1))
     }
-    // create: defaults to false
-    fn namespace_to_module_namespace(
+    /// create: defaults to false
+    pub fn namespace_to_module_namespace(
         &self,
         name: &ResolvedModuleName,
         phase: Phase,
@@ -220,7 +220,7 @@ impl NameSpace {
     fn namespace_get_variable(&self, phase_level: Phase, name: &Symbol) -> Option<Ast> {
         self.namespace_to_definitions(phase_level, |d| d.variables.get(name).cloned())
     }
-    fn namespace_get_transformer(
+    pub fn namespace_get_transformer(
         &self,
         phase_level: Phase,
         name: &Symbol,

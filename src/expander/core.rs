@@ -21,7 +21,7 @@ impl Expander {
                 SourceLocation::default(),
                 Properties::new(),
             ),
-            Binding::TopLevel(sym.0),
+            Binding::Module(sym.0),
         )
     }
 
@@ -72,7 +72,7 @@ impl Expander {
                 })?;
             match b {
                 Binding::Local(_) => Err(format!("{sym} is not a core form")),
-                Binding::TopLevel(s) => Ok(s),
+                Binding::Module(s) => Ok(s),
             }
         })
     }

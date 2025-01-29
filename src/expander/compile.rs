@@ -127,7 +127,7 @@ impl Expander {
                 })?;
                 match b {
                     Binding::Local(b) => Ok(Ast::Symbol(key_to_symbol(b))),
-                    Binding::TopLevel(s) => ns
+                    Binding::Module(s) => ns
                         .variables
                         .get(&s.clone().into())
                         .ok_or(format!("missing core bindig for primitive {s}"))
