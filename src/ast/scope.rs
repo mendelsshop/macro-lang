@@ -1,6 +1,6 @@
 use std::{
     cell::{Ref, RefCell},
-    collections::{BTreeMap, BTreeSet},
+    collections::{btree_map::Keys, BTreeMap, BTreeSet},
     hash::Hash,
     rc::Rc,
 };
@@ -11,7 +11,83 @@ use crate::expander::{binding::Binding, phase::Phase, Expander};
 
 use super::{syntax::Syntax, Ast, Pair, Symbol};
 
-pub type MutableMap<K, V> = Rc<RefCell<BTreeMap<K, V>>>;
+impl<K, V> MutableMap<K, V> {
+    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<Ref<'_, V>>
+    where
+        K: std::borrow::Borrow<Q> + Ord,
+        Q: Ord,
+    {
+        Ref::filter_map(self.0.borrow(), |this| this.get(key)).ok()
+    }
+
+    pub fn remove<Q: ?Sized>(&self, key: &Q) -> Option<V>
+    where
+        K: std::borrow::Borrow<Q> + Ord,
+        Q: Ord,
+    {
+        self.0.borrow_mut().remove(key)
+    }
+
+    pub fn clear(&self) {
+        self.0.borrow_mut().clear()
+    }
+
+    pub fn insert(&self, key: K, value: V) -> Option<V>
+    where
+        K: Ord,
+    {
+        self.0.borrow_mut().insert(key, value)
+    }
+
+    pub fn entry<T>(
+        &self,
+        key: K,
+        k: impl FnOnce(std::collections::btree_map::Entry<'_, K, V>) -> T,
+    ) -> T
+    where
+        K: Ord,
+        V: Default,
+    {
+        let mut binding = self.0.borrow_mut();
+        let entry = binding.entry(key);
+        k(entry)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.borrow().len()
+    }
+
+    pub fn keys<T>(&self, k: impl FnOnce(Keys<'_, K, V>) -> T) -> T {
+        k(self.0.borrow().keys())
+    }
+
+    pub fn append(&mut self, other: &mut BTreeMap<K, V>)
+    where
+        K: Ord,
+    {
+        self.0.borrow_mut().append(other)
+    }
+
+    pub fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool
+    where
+        K: std::borrow::Borrow<Q> + Ord,
+        Q: Ord,
+    {
+        self.0.borrow().contains_key(key)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.borrow().is_empty()
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
+pub struct MutableMap<K, V>(Rc<RefCell<BTreeMap<K, V>>>);
+
+impl<K, V> Default for MutableMap<K, V> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
 pub type ScopeSet = BTreeSet<Scope>;
 #[derive(Clone, PartialEq)]
 pub struct ScopeData(
@@ -29,8 +105,8 @@ pub enum ScopeNoMultiScope {
 impl ScopeNoMultiScope {
     fn scope_bindings(&self) -> MutableMap<Symbol, BTreeMap<BTreeSet<ScopeNoMultiScope>, Binding>> {
         match self {
-            Self::Simple(scope_data) => Rc::clone(&scope_data.1),
-            Self::Representative(representative) => Rc::clone(&representative.0 .1),
+            Self::Simple(scope_data) => scope_data.1.clone(),
+            Self::Representative(representative) => representative.0 .1.clone(),
         }
     }
 
@@ -39,12 +115,8 @@ impl ScopeNoMultiScope {
         key: &'a Symbol,
     ) -> Option<Ref<'a, BTreeMap<BTreeSet<ScopeNoMultiScope>, Binding>>> {
         match self {
-            Self::Simple(scope_data) => {
-                Ref::filter_map(scope_data.1.borrow(), |map| map.get(key)).ok()
-            }
-            Self::Representative(representative) => {
-                Ref::filter_map(representative.0 .1.borrow(), |map| map.get(key)).ok()
-            }
+            Self::Simple(scope_data) => scope_data.1.get(key),
+            Self::Representative(representative) => representative.0 .1.get(key),
         }
     }
 }
@@ -82,7 +154,7 @@ impl std::fmt::Debug for ScopeData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Scope")
             .field(&self.0)
-            .field(&self.1.borrow().keys().collect::<BTreeSet<_>>())
+            .field(&self.1.keys(|keys| keys.cloned().collect::<BTreeSet<_>>()))
             .finish()
     }
 }
@@ -221,9 +293,9 @@ impl Expander {
         phase: Phase,
     ) -> ScopeNoMultiScope {
         ScopeNoMultiScope::Representative({
-            let this = multi_scope.0.borrow().get(&phase).cloned();
+            let this = multi_scope.0.get(&phase);
             match this {
-                Some(x) => x,
+                Some(x) => x.clone(),
                 None => {
                     let s = Representative(
                         ScopeData(self.scope_creator.next(), MutableMap::default()),
@@ -231,7 +303,7 @@ impl Expander {
                         phase.clone(),
                     )
                     .clone();
-                    multi_scope.0.borrow_mut().insert(phase, s.clone());
+                    multi_scope.0.insert(phase, s.clone());
                     s
                 }
             }
@@ -274,11 +346,9 @@ impl Expander {
             .ok_or("cannot bind in empty scope set".to_string())
             .map(|max_scope| {
                 let bindings = max_scope.scope_bindings();
-                bindings
-                    .borrow_mut()
-                    .entry(sym)
-                    .or_default()
-                    .insert(scopes, binding);
+                bindings.entry(sym, |entry| {
+                    entry.or_default().insert(scopes, binding);
+                })
             })
     }
     pub fn add_binding(

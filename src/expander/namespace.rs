@@ -1,8 +1,4 @@
-use std::{
-    cell::{Ref, RefCell},
-    collections::HashMap,
-    rc::Rc,
-};
+use std::{cell::Ref, collections::HashMap};
 
 use crate::ast::{
     scope::{MultiScope, MutableMap, Scope, ShiftedMultiScope},
@@ -86,27 +82,22 @@ impl NameSpace {
     fn make_module_namespace(&mut self, name: ResolvedModuleName, for_submodule: bool) -> Self {
         let module_namespace = NameSpace {
             submodule_declarations: if for_submodule {
-                Rc::clone(&self.submodule_declarations)
+                self.submodule_declarations.clone()
             } else {
                 MutableMap::default()
             },
-            module_declarations: Rc::clone(&self.module_declarations),
+            module_declarations: self.module_declarations.clone(),
             ..Default::default()
         };
         self.module_instances
-            .borrow_mut()
             .insert((name, Phase(0)), module_namespace.clone());
         module_namespace
     }
     fn namespace_to_module(&self, name: &ResolvedModuleName) -> Option<Ref<'_, Module>> {
         {
-            Ref::filter_map(self.module_declarations.borrow(), |borrow| borrow.get(name))
-                .or_else(|_| {
-                    Ref::filter_map(self.submodule_declarations.borrow(), |borrow| {
-                        borrow.get(name)
-                    })
-                })
-                .ok()
+            self.module_declarations
+                .get(name)
+                .or_else(|| self.submodule_declarations.get(name))
         }
     }
     /// as_submodule: defualts to false
@@ -116,7 +107,6 @@ impl NameSpace {
         } else {
             self.module_declarations.clone()
         }
-        .borrow_mut()
         .insert(name, m);
     }
 }
