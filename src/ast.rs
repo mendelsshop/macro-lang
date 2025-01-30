@@ -1,6 +1,6 @@
 pub mod scope;
 pub mod syntax;
-use scope::Scope;
+use scope::{ScopeNoMultiScope, ShiftedMultiScope};
 use syntax::{Properties, SourceLocation, Syntax};
 
 use std::{
@@ -217,13 +217,15 @@ pub struct Symbol(pub Rc<str>, pub usize);
 impl Symbol {
     pub(crate) fn datum_to_syntax(
         self,
-        scopes: Option<BTreeSet<Scope>>,
+        scopes: Option<BTreeSet<ScopeNoMultiScope>>,
+        shifted_multi_scopes: Option<BTreeSet<ShiftedMultiScope>>,
         srcloc: Option<SourceLocation>,
         properties: Option<Properties>,
     ) -> Syntax<Self> {
         Syntax(
             self,
             scopes.unwrap_or_default(),
+            shifted_multi_scopes.unwrap_or_default(),
             srcloc.unwrap_or_default(),
             properties.unwrap_or_default(),
         )
@@ -405,22 +407,28 @@ impl Ast {
         matches!(self,  Self::Pair(p) if p.list() ) || *self == Self::TheEmptyList
     }
 
-    pub(crate) fn scope_set(&self) -> Option<BTreeSet<Scope>> {
+    pub(crate) fn scope_set(&self) -> Option<BTreeSet<ScopeNoMultiScope>> {
         match self {
             Self::Syntax(s) => Some(s.1.clone()),
             _ => None,
         }
     }
+    pub(crate) fn shifted_multi_scope_set(&self) -> Option<BTreeSet<ShiftedMultiScope>> {
+        match self {
+            Self::Syntax(s) => Some(s.2.clone()),
+            _ => None,
+        }
+    }
     pub(crate) fn properties(&self) -> Option<Properties> {
         match self {
-            Self::Syntax(s) => Some(s.3.clone()),
+            Self::Syntax(s) => Some(s.4.clone()),
             _ => None,
         }
     }
 
     pub(crate) fn syntax_src_loc(&self) -> Option<syntax::SourceLocation> {
         match self {
-            Self::Syntax(s) => Some(s.2.clone()),
+            Self::Syntax(s) => Some(s.3.clone()),
             _ => None,
         }
     }

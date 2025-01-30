@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{
     cell::RefCell,
     collections::{BTreeSet, VecDeque},
@@ -18,9 +19,10 @@ use crate::{
 
 use super::{
     binding::{Binding, CompileTimeBinding, CompileTimeEnvoirnment},
-    duplicate_check::{self, make_check_no_duplicate_table, DuplicateMap},
+    duplicate_check::{make_check_no_duplicate_table, DuplicateMap},
     expand_context::ExpandContext,
     namespace::NameSpace,
+    phase::Phase,
     r#match::match_syntax,
     Expander,
 };
@@ -50,18 +52,10 @@ impl Expander {
         s: Ast,
         ctx: ExpandContext,
     ) -> Result<Ast, String> {
-        let Ast::Syntax(ref id_syntax) = p.0 else {
-            unreachable!()
-        };
-        let Ast::Symbol(ref id) = id_syntax.0 else {
-            unreachable!();
-        };
-        let binding = self.resolve(&id_syntax.with_ref(id.clone()), false)
-            // .inspect_err(|e| {
-                    // dbg!(format!("{e} id"));
-                // })
-        ;
-        let binding = binding.and_then(|binding| self.lookup(&binding, &ctx, id));
+        let id: Syntax<Symbol> = p.0.try_into()?;
+        let id_sym = id.0.clone();
+        let binding = self.resolve(id, ctx.phase, false);
+        let binding = binding.and_then(|binding| self.lookup(&binding, &ctx, &id_sym));
         match binding {
             Ok(binding) if !matches!(&binding, CompileTimeBinding::Regular(Ast::Symbol(sym)) if *sym == self.variable) => {
                 self.dispatch(binding, s, ctx)
@@ -72,19 +66,26 @@ impl Expander {
 
     fn expand_implicit(&mut self, sym: Symbol, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
         let scopes = s.scope_set();
-        let id = sym.clone().datum_to_syntax(scopes, None, None);
-        let binding = self.resolve(&id, false).inspect_err(|e| {
-            dbg!(format!("{e}"));
-        });
+        let shifted_multi_scope_set = s.shifted_multi_scope_set();
+        let id = sym
+            .clone()
+            .datum_to_syntax(scopes, shifted_multi_scope_set, None, None);
+        let binding = self.resolve(id, ctx.phase, false);
         let transformer = binding.and_then(|binding| self.lookup(&binding, &ctx, &sym))?;
         match transformer {
             CompileTimeBinding::CoreForm(_) if ctx.only_immediate => Ok(s),
             CompileTimeBinding::Regular(Ast::Function(_)) | CompileTimeBinding::CoreForm(_) => {
                 let scope_set = s.scope_set();
+                let shifted_multi_scope_set = s.shifted_multi_scope_set();
                 let syntax_src_loc = s.syntax_src_loc();
                 self.dispatch(
                     transformer,
-                    list!(Ast::Symbol(sym); s).datum_to_syntax(scope_set, syntax_src_loc, None),
+                    list!(Ast::Symbol(sym); s).datum_to_syntax(
+                        scope_set,
+                        shifted_multi_scope_set,
+                        syntax_src_loc,
+                        None,
+                    ),
                     ctx,
                 )
             }
@@ -92,14 +93,19 @@ impl Expander {
         }
     }
 
-    fn lookup(
+    fn lookup<T: fmt::Display>(
         &self,
         binding: &Binding,
         ctx: &ExpandContext,
-        id: &Symbol,
+        id: &T,
     ) -> Result<CompileTimeBinding, String> {
-        ctx.env
-            .lookup(binding, &ctx.namespace, id, self.variable.clone())
+        ctx.env.lookup(
+            binding,
+            &ctx.namespace,
+            ctx.phase,
+            id,
+            self.variable.clone(),
+        )
     }
     pub(crate) fn apply_transformer(
         &mut self,
@@ -110,6 +116,7 @@ impl Expander {
         let intro_scope = self.scope_creator.new_scope();
         let intro_s = s.add_scope(intro_scope.clone());
         let uses_s = self.maybe_add_use_site_scope(intro_s, ctx);
+        // TODO: transformer might need expand context
         let transformed_s = m.apply_single(Ast::Pair(Box::new(Pair(uses_s, Ast::TheEmptyList))))?;
         if !matches!(transformed_s, Ast::Syntax(_)) {
             return Err(format!("transformer produced non syntax: {transformed_s}"));
@@ -175,12 +182,13 @@ impl Expander {
         original_syntax: Ast,
     ) -> Result<Ast, String> {
         // let mut bodys = bodys.into_iter();
+        let phase = ctx.phase;
         match bodys.pop_front() {
             None => self.finish_expanding_body(body_ctx, done_bodys, val_binds, original_syntax),
             Some(body) => {
                 let exp_body = self.expand(body, body_ctx.clone())?;
-                if let Ok(pat) = self.core_form_symbol(exp_body.clone()) {
-                    match pat.to_string().as_str() {
+                if let Ok(pat) = self.core_form_symbol(exp_body.clone(), phase) {
+                    match pat.0.to_string().as_str() {
                         "begin" => {
                             let m = match_syntax(
                                 exp_body,
@@ -214,15 +222,16 @@ impl Expander {
                                 &body_ctx,
                             );
                             let ids = to_id_list(ids)?;
-                            let new_duplicates = duplicate_check::check_no_duplicate_ids(
+                            let new_duplicates = self.check_no_duplicate_ids(
                                 ids.clone(),
+                                phase,
                                 &exp_body,
                                 duplicate,
                             )?;
                             let keys = ids
                                 .clone()
                                 .into_iter()
-                                .map(|id| self.add_local_binding(id))
+                                .map(|id| self.add_local_binding(id, phase))
                                 .collect_vec();
 
                             body_ctx.env.0.extend(
@@ -230,7 +239,7 @@ impl Expander {
                                     .map(|key| (key, Ast::Symbol(self.variable.clone()))),
                             );
 
-                            val_binds.append(&mut self.no_binds(done_bodys));
+                            val_binds.append(&mut self.no_binds(done_bodys, phase));
                             val_binds.push((ids, m("rhs".into()).ok_or("internal error")?));
                             self.expand_body_loop(
                                 body_ctx,
@@ -262,14 +271,15 @@ impl Expander {
                                 .into_iter()
                                 .map(std::convert::TryInto::try_into)
                                 .collect::<Result<Vec<_>, _>>()?;
-                            let new_duplicates = duplicate_check::check_no_duplicate_ids(
+                            let new_duplicates = self.check_no_duplicate_ids(
                                 ids.clone(),
+                                phase,
                                 &exp_body,
                                 duplicate,
                             )?;
                             let keys = ids
                                 .into_iter()
-                                .map(|id| self.add_local_binding(id))
+                                .map(|id| self.add_local_binding(id, phase))
                                 .collect_vec();
                             let vals = self.eval_for_syntaxes_binding(
                                 m("rhs".into()).ok_or("internal error")?,
@@ -315,11 +325,20 @@ impl Expander {
             }
         }
     }
+    pub fn all_datum_to_syntax(s: Ast, expr: Ast) -> Ast {
+        expr.datum_to_syntax(
+            s.scope_set(),
+            s.shifted_multi_scope_set(),
+            s.syntax_src_loc(),
+            s.properties(),
+        )
+    }
     pub fn core_datum_to_syntax(&self, expr: Ast) -> Ast {
         expr.datum_to_syntax(
-            Some(self.core_syntax.1.clone()),
-            Some(self.core_syntax.2.clone()),
-            Some(self.core_syntax.3.clone()),
+            self.core_syntax.scope_set(),
+            self.core_syntax.shifted_multi_scope_set(),
+            self.core_syntax.syntax_src_loc(),
+            self.core_syntax.properties(),
         )
     }
     fn remove_use_site_scopes(&self, syntax: Ast, ctx: &ExpandContext) -> Ast {
@@ -331,17 +350,28 @@ impl Expander {
     }
     fn finish_expanding_body(
         &mut self,
-        body_ctx: ExpandContext,
+        mut body_ctx: ExpandContext,
         mut done_bodys: Vec<Ast>,
         val_binds: Vec<(Vec<Syntax<Symbol>>, Ast)>,
         s: Ast,
     ) -> Result<Ast, String> {
+        let phase = body_ctx.phase;
         if done_bodys.is_empty() {
             return Err(format!(
                 "begin (possibly implicit): the last form is not an expression {s}"
             ));
         }
+        let s_core_syntax = self.core_syntax.clone().syntax_shift_phase_level(phase);
+
+        let mut scopes = body_ctx.scopes;
+        let mut old_use_site_scopes = None;
+        std::mem::swap(&mut old_use_site_scopes, &mut body_ctx.use_site_scopes);
+        // after this point I think we have no use this rc/refcell as we do back to None
+        if let Some(use_site_scopes) = old_use_site_scopes {
+            scopes.append(&mut Rc::into_inner(use_site_scopes).unwrap().into_inner());
+        }
         let finish_ctx = ExpandContext {
+            scopes,
             use_site_scopes: None,
             only_immediate: false,
             post_expansion_scope: None,
@@ -351,20 +381,20 @@ impl Expander {
             self.expand(done_bodys.remove(0), finish_ctx.clone())?
         } else {
             list!(
-                self.core_datum_to_syntax("begin".into());
+                Self::all_datum_to_syntax(s_core_syntax.clone(), "begin".into());
                 done_bodys
                     .into_iter()
                     .try_rfold(Ast::TheEmptyList, |exprs, expr| {
                         self.expand(expr, finish_ctx.clone())
                             .map(|expr| list!(expr; exprs))
                 })?)
-            .datum_to_syntax(None, None, None)
+            .datum_to_syntax(None, None, None, None)
         };
         if val_binds.is_empty() {
             Ok(finish_bodys)
         } else {
             Ok(list!(
-                self.core_datum_to_syntax("letrec-values".into()),
+                Self::all_datum_to_syntax(s_core_syntax, "letrec-values".into()),
                 val_binds
                     .into_iter()
                     .try_rfold(Ast::TheEmptyList, |exprs, (ids, values)| {
@@ -374,27 +404,28 @@ impl Expander {
                                     list!(
                                         Ast::Syntax(Box::new(id.clone().with(Ast::Symbol(id.0))));
                                         ids)
-                                ).datum_to_syntax(None, None, None),
+                                ).datum_to_syntax(None, None, None, None),
                                 expr); exprs)
                         })
                     })?,
                 finish_bodys
             )
-            .datum_to_syntax(None, None, None))
+            .datum_to_syntax(None, None, None, None))
         }
     }
-    fn no_binds(&self, done_bodys: Vec<Ast>) -> Vec<(Vec<Syntax<Symbol>>, Ast)> {
+    fn no_binds(&self, done_bodys: Vec<Ast>, phase: Phase) -> Vec<(Vec<Syntax<Symbol>>, Ast)> {
+        let s_core_syntax = self.core_syntax.clone().syntax_shift_phase_level(phase);
         done_bodys
             .into_iter()
             .map(|body| {
                 (
                     vec![],
                     list!(
-                        self.core_datum_to_syntax("begin".into()),
+                        Self::all_datum_to_syntax(s_core_syntax.clone(), "begin".into()),
                         body,
                         list!(
-                            self.core_datum_to_syntax("#%app".into()),
-                            self.core_datum_to_syntax("values".into())
+                            Self::all_datum_to_syntax(s_core_syntax.clone(), "#%app".into()),
+                            Self::all_datum_to_syntax(s_core_syntax.clone(), "values".into())
                         )
                     ),
                 )
@@ -418,10 +449,13 @@ impl Expander {
                     .add_scope(inside_scope.clone()))
             })?
             .to_list_checked()?;
+        let mut scopes = context.scopes.clone();
+        scopes.extend([outside_scope.clone(), inside_scope.clone()]);
         let body_context = ExpandContext {
             use_site_scopes: Some(Rc::new(RefCell::new(BTreeSet::new()))),
             only_immediate: true,
             post_expansion_scope: Some(inside_scope),
+            scopes,
             ..context.clone()
         };
         self.expand_body_loop(
@@ -443,7 +477,12 @@ impl Expander {
     ) -> Result<(Vec<Ast>, Ast), String> {
         let exp_rhs = self.expand_transformer(rhs, ctx.clone())?;
         Ok((
-            self.eval_for_bindings(exp_rhs.clone(), id_count, ctx.namespace)?,
+            self.eval_for_bindings(
+                exp_rhs.clone(),
+                id_count,
+                ctx.phase + Phase(1),
+                ctx.namespace,
+            )?,
             exp_rhs,
         ))
     }
@@ -461,30 +500,33 @@ impl Expander {
         &self,
         exp_rhs: Ast,
         id_count: usize,
+        phase: Phase,
         namespace: NameSpace,
     ) -> Result<Vec<Ast>, String> {
-        let compiled = self.compile(exp_rhs.clone(), &namespace)?;
-        self.expand_time_eval(list!("#%expression".into(), compiled))
-            .and_then(|values| {
-                let list = match values {
-                    Values::Many(vec) => vec,
-                    Values::Single(ast) => vec![ast],
-                };
-                if id_count != list.len() {
-                    Err(format!(
-                        "wrong number of results ({} vs {id_count}) from {exp_rhs}",
-                        list.len()
-                    ))
-                } else {
-                    Ok(list)
-                }
-            })
+        let compiled = self.compile(exp_rhs.clone(), &namespace, phase)?;
+        self.expand_time_eval(compiled).and_then(|values| {
+            let list = match values {
+                Values::Many(vec) => vec,
+                Values::Single(ast) => vec![ast],
+            };
+            if id_count != list.len() {
+                Err(format!(
+                    "wrong number of results ({} vs {id_count}) from {exp_rhs}",
+                    list.len()
+                ))
+            } else {
+                Ok(list)
+            }
+        })
     }
 
     fn expand_transformer(&mut self, rhs: Ast, ctx: ExpandContext) -> Result<Ast, String> {
         self.expand(
             rhs,
             ExpandContext {
+                scopes: BTreeSet::new(),
+                module_scopes: BTreeSet::new(),
+                phase: ctx.phase + Phase(1),
                 env: CompileTimeEnvoirnment::new(),
                 only_immediate: false,
                 post_expansion_scope: None,
@@ -498,8 +540,8 @@ impl Expander {
         s: Syntax<Symbol>,
         ctx: ExpandContext,
     ) -> Result<Ast, String> {
-        let binding = self.resolve(&s, false);
         let id = s.0.clone();
+        let binding = self.resolve(s.clone(), ctx.phase, false);
         let s = Ast::Syntax(Box::new(s.with(Ast::Symbol(id.clone()))));
         match binding {
             Ok(binding) => self.dispatch(self.lookup(&binding, &ctx, &id)?, s, ctx),
@@ -518,5 +560,10 @@ pub fn to_id_list(ids: Ast) -> Result<Vec<Syntax<Symbol>>, String> {
 }
 
 pub fn rebuild(s: Ast, rator: Ast) -> Ast {
-    rator.datum_to_syntax(s.scope_set(), s.syntax_src_loc(), s.properties())
+    rator.datum_to_syntax(
+        s.scope_set(),
+        s.shifted_multi_scope_set(),
+        s.syntax_src_loc(),
+        s.properties(),
+    )
 }

@@ -6,10 +6,16 @@ use crate::{
     list, sexpr,
 };
 
-use super::{binding::Binding, namespace::NameSpace, r#match::match_syntax, Expander};
+use super::{
+    binding::Binding,
+    namespace::NameSpace,
+    phase::{self, Phase},
+    r#match::match_syntax,
+    Expander,
+};
 
 impl Expander {
-    pub fn compile(&self, s: Ast, ns: &NameSpace) -> Result<Ast, String> {
+    pub fn compile(&self, s: Ast, ns: &NameSpace, phase: Phase) -> Result<Ast, String> {
         let compile = |s| self.compile(s, ns);
         let Ast::Syntax(syntax) = s.clone() else {
             panic!()

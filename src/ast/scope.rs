@@ -123,6 +123,11 @@ impl ScopeNoMultiScope {
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct ShiftedMultiScope(pub Phase, pub MultiScope);
 
+impl ShiftedMultiScope {
+    fn shift_multi_scope(self, delta: Phase) -> Self {
+        Self(delta + self.0, self.1)
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub enum Scope {
     Simple(ScopeNoMultiScope),
@@ -309,6 +314,7 @@ impl Expander {
             }
         })
     }
+
     fn syntax_scope_set<T>(&mut self, s: Syntax<T>, phase: Phase) -> BTreeSet<ScopeNoMultiScope> {
         let scopes = s.1;
         let multi_scope = s.2;
@@ -421,5 +427,25 @@ impl Expander {
             && self.syntax_scope_set_ref(syntax, phase, |this, scopes| {
                 this.syntax_scope_set_ref(other, phase, |_, other_scopes| scopes == other_scopes)
             })
+    }
+}
+impl Ast {
+    pub fn syntax_shift_phase_level(self, phase: Phase) -> Ast {
+        match self {
+            Self::Pair(p) => Self::Pair(Box::new(Pair(
+                p.0.syntax_shift_phase_level(phase),
+                p.1.syntax_shift_phase_level(phase),
+            ))),
+            Self::Syntax(s) => Self::Syntax(Box::new(Syntax(
+                s.0.syntax_shift_phase_level(phase),
+                s.1,
+                s.2.into_iter()
+                    .map(|sms| sms.shift_multi_scope(phase))
+                    .collect(),
+                s.3,
+                s.4,
+            ))),
+            _ => self,
+        }
     }
 }

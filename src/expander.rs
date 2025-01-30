@@ -40,7 +40,7 @@ pub struct Expander {
     pub scope_creator: UniqueNumberManager,
     expand_time_env: EnvRef,
     run_time_env: EnvRef,
-    core_syntax: Syntax<Ast>,
+    core_syntax: Ast,
     pub(crate) variable: Symbol,
 }
 
