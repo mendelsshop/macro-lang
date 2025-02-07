@@ -31,6 +31,7 @@ mod expand_context;
 mod expand_expr;
 mod expand_top_level;
 mod r#match;
+pub mod module_path;
 mod namespace;
 pub mod phase;
 pub struct Expander {
