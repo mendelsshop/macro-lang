@@ -1,4 +1,6 @@
-use std::{path::Path, rc::Rc};
+use std::{iter, path::Path, rc::Rc};
+
+use itertools::Itertools;
 
 use crate::ast::Symbol;
 
@@ -64,12 +66,28 @@ fn build_module_name(
             ]))))
         }
         Some(ResolvedModulePath::List(enclosing)) if matches!(s, SubModulePathElement::Up) => {
-            if let SubModulePathElement::Up = s {
-                todo!();
+            let (last, enclosing) = enclosing
+                .split_last()
+                .ok_or(format!("too many \"..\"s: {original}"))?;
+            if enclosing.is_empty() {
+                Ok(Some(ResolvedModulePath::Symbol(last.clone())))
+            } else {
+                Ok(Some(ResolvedModulePath::List(Into::<Rc<[_]>>::into(
+                    enclosing,
+                ))))
             }
-            todo!()
         }
-        Some(ResolvedModulePath::List(enclosing)) => todo!(),
+        Some(ResolvedModulePath::List(enclosing)) => {
+            Ok(Some(ResolvedModulePath::List(Into::<Rc<[_]>>::into(
+                enclosing
+                    .clone()
+                    .into_iter()
+                    .cloned()
+                    .chain(iter::once(s.clone().into()))
+                    .collect_vec()
+                    .as_slice(),
+            ))))
+        }
     }
 }
 
