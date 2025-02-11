@@ -2,7 +2,7 @@ use std::{iter, path::Path, rc::Rc};
 
 use itertools::Itertools;
 
-use crate::ast::Symbol;
+use crate::ast::{Ast, Symbol};
 
 #[derive(Debug)]
 pub enum ModulePath {
@@ -12,6 +12,13 @@ pub enum ModulePath {
     Submodule(SubModuleType, Rc<[SubModulePathElement]>),
 }
 
+impl TryFrom<Ast> for ModulePath {
+    type Error = String;
+
+    fn try_from(value: Ast) -> Result<Self, Self::Error> {
+        todo!()
+    }
+}
 #[derive(Debug)]
 pub enum ResolvedModulePath {
     Symbol(Symbol),
@@ -25,7 +32,9 @@ impl ModulePath {
         let original = format!("{self:?}");
         match self {
             // TODO: what does (quote symbol) coresspond to in the typed repr
-            ModulePath::Root(root_module_path) => todo!(),
+            ModulePath::Root(RootModulePath::Identifier(i)) => {
+                Ok(Some(ResolvedModulePath::Symbol(i)))
+            }
             ModulePath::Submodule(SubModuleType::Up, sub_module_path_elements) => {
                 sub_module_path_elements
                     .into_iter()
@@ -48,6 +57,7 @@ impl ModulePath {
                 ModulePath::Root(root_module_path).resolve_module_path(enclosing)?,
                 |enclosing, s| build_module_name(s, enclosing, &original),
             ),
+            _ => Err(format!("not a supported module path: {original}")),
         }
     }
 }
@@ -101,15 +111,16 @@ pub enum SubModuleType {
 }
 
 #[derive(Debug)]
-pub enum LibraryRelativePath {
-    Slashed(Rc<str>, Rc<str>),
-    Single(Rc<str>),
-}
+pub struct LibraryRelativePath(Rc<Path>);
 #[derive(Debug)]
+// we do not support file (platform dependent)
+// we do not support planet (maybe some day)
 pub enum RootModulePath {
+    // id or (lib rel-string ..)
+    // maybe seperate id an (lib ..)
     Lib(LibraryRelativePath, Rc<[LibraryRelativePath]>),
+    // from (quote id)
     Identifier(Symbol),
-    File(Rc<Path>),
 }
 
 #[derive(Debug, Clone)]
