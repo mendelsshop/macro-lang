@@ -210,6 +210,7 @@ pub enum Ast {
     Boolean(bool),
     Symbol(Symbol),
     Function(Function),
+    String(Rc<str>),
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -282,6 +283,7 @@ impl fmt::Display for Ast {
             Self::Syntax(s) => write!(f, "#'{}", s.0.clone().syntax_to_datum()),
             Self::Number(n) => write!(f, "{n}"),
             Self::Symbol(s) => write!(f, "'{s}"),
+            Self::String(s) => write!(f, "\"{s}\""),
             Self::Function(function) => write!(f, "{function}"),
             Self::Boolean(b) => write!(f, "{b}"),
             Self::TheEmptyList => write!(f, "()"),
