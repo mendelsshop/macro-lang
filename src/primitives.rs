@@ -6,6 +6,19 @@ use crate::{
 };
 
 impl Ast {
+    pub fn primitive_plus(self) -> Result<Values, String> {
+        todo!()
+    }
+    pub fn primitive_random(self) -> Result<Values, String> {
+        todo!()
+    }
+    // TODO: these are all going to need access to the expander
+    pub fn primitive_free_identifier(self) -> Result<Values, String> {
+        todo!()
+    }
+    pub fn primitive_bound_identifier(self) -> Result<Values, String> {
+        todo!()
+    }
     pub fn primitive_datum_to_syntax(self) -> Result<Values, String> {
         let arity = self.size();
         let Self::Pair(e) = self else {
@@ -20,6 +33,7 @@ impl Ast {
         // TODO: properties and location
         Ok(Values::Single(syntax_object.datum_to_syntax(
             scopes.scope_set(),
+            scopes.shifted_multi_scope_set(),
             None,
             None,
         )))
@@ -197,4 +211,20 @@ pub fn new_primitive_env(mut adder: impl FnMut(Rc<str>, Ast)) {
         "values".into(),
         Ast::Function(Function::Primitive(Ast::primitive_values)),
     );
+    adder(
+        "bound-identifier=?".into(),
+        Ast::Function(Function::Primitive(Ast::primitive_bound_identifier)),
+    );
+    adder(
+        "free-identifier=?".into(),
+        Ast::Function(Function::Primitive(Ast::primitive_free_identifier)),
+    );
+    adder(
+        "random".into(),
+        Ast::Function(Function::Primitive(Ast::primitive_random)),
+    );
+    adder(
+        "+".into(),
+        Ast::Function(Function::Primitive(Ast::primitive_plus)),
+    )
 }

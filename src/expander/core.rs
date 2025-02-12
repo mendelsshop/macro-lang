@@ -17,8 +17,8 @@ use super::{
 };
 
 impl Expander {
-    fn add_core_binding(&mut self, sym: Symbol) -> Result<(), String> {
-        self.add_binding(
+    fn add_core_binding(&self, sym: Symbol) -> Result<(), String> {
+        Self::add_binding(
             Syntax(
                 sym.clone(),
                 self.core_syntax.1.clone(),
@@ -110,11 +110,11 @@ impl Expander {
         );
     }
 
-    pub fn core_form_symbol(&mut self, s: Ast, phase: Phase) -> Result<Symbol, String> {
+    pub fn core_form_symbol(s: Ast, phase: Phase) -> Result<Symbol, String> {
         try_match_syntax(s, sexpr!((id . "_"))).and_then(|f| {
             // could this also be a plain symbol?
             let sym: Syntax<Symbol> = f("id".into()).ok_or("internal error")?.try_into()?;
-            let b = self.resolve(sym.clone(), phase, false).inspect_err(|e| {
+            let b = Self::resolve(sym.clone(), phase, false).inspect_err(|e| {
                 dbg!(format!("{e}"));
             })?;
             match b {

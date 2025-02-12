@@ -1,25 +1,18 @@
-use std::{
-    collections::{BTreeSet, HashMap},
-    rc::Rc,
-};
+use std::{collections::HashMap, rc::Rc};
 
 use binding::CoreForm;
 use expand_context::ExpandContext;
 use namespace::NameSpace;
 
 use crate::{
-    ast::scope::Scope,
-    ast::{syntax::Syntax, Ast, Symbol},
+    ast::{scope::AdjustScope, syntax::EMPTY_SYNTAX},
+    evaluator::Values,
+};
+use crate::{
+    ast::{scope::Scope, syntax::Syntax, Ast, Symbol},
     evaluator::{Env, EnvRef},
     primitives::new_primitive_env,
     UniqueNumberManager,
-};
-use crate::{
-    ast::{
-        scope::AdjustScope,
-        syntax::{Properties, SourceLocation},
-    },
-    evaluator::Values,
 };
 
 pub mod binding;
@@ -38,10 +31,9 @@ pub struct Expander {
     core_forms: HashMap<Rc<str>, CoreForm>,
     core_primitives: HashMap<Rc<str>, Ast>,
     core_scope: Scope,
-    pub scope_creator: UniqueNumberManager,
     expand_time_env: EnvRef,
     run_time_env: EnvRef,
-    core_syntax: Ast,
+    core_syntax: Syntax<Ast>,
     pub(crate) variable: Symbol,
 }
 
@@ -54,17 +46,10 @@ impl Default for Expander {
 impl Expander {
     #[must_use]
     pub fn new() -> Self {
-        let mut scope_creator = UniqueNumberManager::new();
-        let core_scope = scope_creator.new_scope();
-        let variable = scope_creator.gen_sym("variable");
+        let variable = UniqueNumberManager::gen_sym("variable");
+        let core_scope = UniqueNumberManager::new_multi_scope();
         let mut this = Self {
-            core_syntax: Syntax(
-                Ast::Boolean(false),
-                BTreeSet::from([core_scope.clone()]),
-                SourceLocation::default(),
-                Properties::new(),
-            ),
-            scope_creator,
+            core_syntax: (EMPTY_SYNTAX.add_scope(core_scope.clone())),
             core_scope,
             core_primitives: HashMap::new(),
             core_forms: HashMap::new(),

@@ -1,3 +1,4 @@
+use crate::UniqueNumberManager;
 use crate::{
     ast::{
         scope::{AdjustScope, Scope},
@@ -42,7 +43,7 @@ macro_rules! make_let_values_form {
                     )),
                 )?
             };
-            let sc = self.scope_creator.new_scope();
+            let sc = UniqueNumberManager::new_scope();
             let trans_idss = if $syntaxes {
                 itertools::Itertools::try_collect(
                     m("trans-id".into())

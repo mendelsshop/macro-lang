@@ -1,6 +1,9 @@
 use std::{collections::HashMap, fmt};
 
-use crate::ast::{syntax::Syntax, Ast, Symbol};
+use crate::{
+    ast::{syntax::Syntax, Ast, Symbol},
+    UniqueNumberManager,
+};
 
 use super::{expand_context::ExpandContext, namespace::NameSpace, phase::Phase, Expander};
 
@@ -101,12 +104,12 @@ impl CompileTimeEnvoirnment {
         }
     }
 }
-impl Expander {
-    pub fn free_identifier(&mut self, a: Syntax<Symbol>, b: Syntax<Symbol>, phase: Phase) -> bool {
-        let a_sym = a.0.clone();
+impl Syntax<Symbol> {
+    pub fn free_identifier(self, b: Syntax<Symbol>, phase: Phase) -> bool {
+        let a_sym = self.0.clone();
         let b_sym = b.0.clone();
-        let ab = self.resolve(a, phase, false);
-        let bb = self.resolve(b, phase, false);
+        let ab = Expander::resolve(self, phase, false);
+        let bb = Expander::resolve(b, phase, false);
         match (ab, bb) {
             (Ok(Binding::Local(f0_self)), Ok(Binding::Local(f0_other))) => f0_self == (f0_other),
             (Ok(Binding::Module(f0_self)), Ok(Binding::Module(f0_other))) => {
@@ -117,9 +120,11 @@ impl Expander {
             _ => a_sym == b_sym,
         }
     }
-    pub fn add_local_binding(&mut self, id: Syntax<Symbol>, phase: Phase) -> Symbol {
-        let symbol = self.scope_creator.gen_sym(&id.0 .0);
-        self.add_binding(id, phase, Binding::Local(symbol.clone()));
+}
+impl Expander {
+    pub fn add_local_binding(id: Syntax<Symbol>, phase: Phase) -> Symbol {
+        let symbol = UniqueNumberManager::gen_sym(&id.0 .0);
+        Self::add_binding(id, phase, Binding::Local(symbol.clone()));
         symbol
     }
 }

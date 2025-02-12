@@ -1,7 +1,10 @@
 #![warn(clippy::pedantic, clippy::nursery, clippy::cargo)]
 #![deny(static_mut_refs)]
 #![deny(clippy::use_self, rust_2018_idioms, clippy::missing_panics_doc)]
-use std::io::{BufRead, BufReader, Write};
+use std::{
+    io::{BufRead, BufReader, Write},
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use ast::{
     scope::{MultiScope, MutableMap, Scope, ScopeNoMultiScope, ShiftedMultiScope},
@@ -17,28 +20,21 @@ mod expander;
 mod primitives;
 mod reader;
 
-#[derive(Debug)]
-struct UniqueNumberManager(usize);
-
+pub struct UniqueNumberManager;
 impl UniqueNumberManager {
-    const fn new() -> Self {
-        Self(1)
+    fn next() -> usize {
+        static COUNTER: AtomicUsize = AtomicUsize::new(1);
+        COUNTER.fetch_add(1, Ordering::Relaxed)
     }
 
-    fn next(&mut self) -> usize {
-        let current = self.0;
-        self.0 += 1;
-        current
-    }
-
-    fn new_scope(&mut self) -> Scope {
+    pub fn new_scope() -> Scope {
         Scope::Simple(ScopeNoMultiScope::Simple(ast::scope::ScopeData(
-            self.next(),
+            Self::next(),
             MutableMap::default(),
         )))
     }
-    fn gen_sym(&mut self, name: impl ToString) -> Symbol {
-        Symbol(name.to_string().into(), self.next())
+    pub fn gen_sym(name: impl ToString) -> Symbol {
+        Symbol(name.to_string().into(), UniqueNumberManager::next())
     }
     pub fn new_multi_scope() -> Scope {
         Scope::ShiftedMultiScope(ShiftedMultiScope(

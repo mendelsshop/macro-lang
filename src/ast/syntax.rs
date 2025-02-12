@@ -83,14 +83,15 @@ const EMPTY_SOURCE_LOCATION: SourceLocation = SourceLocation {
     line: 0,
     column: 0,
 };
+pub const EMPTY_SYNTAX: Syntax<Ast> = Syntax(
+    Ast::Boolean(false),
+    EMPTY_SCOPES,
+    EMPTY_SHIFTED_MULTI_SCOPES,
+    EMPTY_SOURCE_LOCATION,
+    EMPTY_PROPERTY,
+);
 const fn empty_syntax() -> Syntax<Ast> {
-    Syntax(
-        Ast::Boolean(false),
-        EMPTY_SCOPES,
-        EMPTY_SHIFTED_MULTI_SCOPES,
-        EMPTY_SOURCE_LOCATION,
-        EMPTY_PROPERTY,
-    )
+    EMPTY_SYNTAX
 }
 
 impl TryFrom<Syntax<Ast>> for Syntax<Symbol> {

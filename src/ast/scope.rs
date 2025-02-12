@@ -7,7 +7,10 @@ use std::{
 
 use itertools::Itertools;
 
-use crate::expander::{binding::Binding, phase::Phase, Expander};
+use crate::{
+    expander::{binding::Binding, phase::Phase, Expander},
+    UniqueNumberManager,
+};
 
 use super::{syntax::Syntax, Ast, Pair, Symbol};
 
@@ -148,6 +151,26 @@ impl Scope {
 }
 #[derive(Clone, PartialEq, Eq, Ord, PartialOrd, Debug)]
 pub struct MultiScope(pub(crate) MutableMap<Phase, Representative>);
+impl MultiScope {
+    fn multi_scope_to_scope_at_phase(&self, phase: Phase) -> ScopeNoMultiScope {
+        ScopeNoMultiScope::Representative({
+            let this = self.0.get(&phase);
+            match this {
+                Some(x) => x.clone(),
+                None => {
+                    let s = Representative(
+                        ScopeData(UniqueNumberManager::next(), MutableMap::default()),
+                        self.clone(),
+                        phase.clone(),
+                    )
+                    .clone();
+                    self.0.insert(phase, s.clone());
+                    s
+                }
+            }
+        })
+    }
+}
 
 // refcell cannot be hashed correctly https://users.rust-lang.org/t/hashmap-keyed-by-rc-refcell/33210/14
 // anywhere where hashing matters the hashing will be done by other fields
@@ -260,6 +283,24 @@ impl AdjustScope for Syntax<Ast> {
         )
     }
 }
+impl AdjustScope for Syntax<()> {
+    fn adjust_scope<O: Operation + Copy>(self, other_scope_set: Scope, _: O) -> Self {
+        Self(
+            self.0,
+            match other_scope_set {
+                Scope::ShiftedMultiScope(ShiftedMultiScope(_, _)) => self.1,
+                Scope::Simple(ref s) => O::operation(self.1, s.clone()),
+            },
+            if let Scope::ShiftedMultiScope(other_scope_set) = other_scope_set {
+                O::operation(self.2, other_scope_set)
+            } else {
+                self.2
+            },
+            self.3,
+            self.4,
+        )
+    }
+}
 impl AdjustScope for Syntax<Symbol> {
     fn adjust_scope<O: Operation + Copy>(self, other_scope_set: Scope, _: O) -> Self {
         Self(
@@ -292,54 +333,6 @@ impl AdjustScope for Ast {
 }
 
 impl Expander {
-    fn multi_scope_to_scope_at_phase(
-        &mut self,
-        multi_scope: &MultiScope,
-        phase: Phase,
-    ) -> ScopeNoMultiScope {
-        ScopeNoMultiScope::Representative({
-            let this = multi_scope.0.get(&phase);
-            match this {
-                Some(x) => x.clone(),
-                None => {
-                    let s = Representative(
-                        ScopeData(self.scope_creator.next(), MutableMap::default()),
-                        multi_scope.clone(),
-                        phase.clone(),
-                    )
-                    .clone();
-                    multi_scope.0.insert(phase, s.clone());
-                    s
-                }
-            }
-        })
-    }
-
-    fn syntax_scope_set<T>(&mut self, s: Syntax<T>, phase: Phase) -> BTreeSet<ScopeNoMultiScope> {
-        let scopes = s.1;
-        let multi_scope = s.2;
-        multi_scope.into_iter().fold(scopes, |mut scopes, sms| {
-            scopes.insert(self.multi_scope_to_scope_at_phase(&sms.1, sms.0 - phase));
-            scopes
-        })
-    }
-    // doesn't take an owned value but has to do a lot of copying is this better than just straight
-    // up cloning
-    // also cannot nest one in another k
-    fn syntax_scope_set_ref<T, U>(
-        &mut self,
-        s: &Syntax<T>,
-        phase: Phase,
-        k: impl FnOnce(&mut Self, BTreeSet<&ScopeNoMultiScope>) -> U,
-    ) -> U {
-        let multi_scopes: Vec<_> =
-            s.2.iter()
-                .map(|sms| (self.multi_scope_to_scope_at_phase(&sms.1, sms.0 - phase)))
-                .collect();
-        let scopes: BTreeSet<&ScopeNoMultiScope> =
-            BTreeSet::from_iter(s.1.iter().chain(multi_scopes.iter()));
-        k(self, scopes)
-    }
     pub fn add_binding_in_scope(
         scopes: BTreeSet<ScopeNoMultiScope>,
         sym: Symbol,
@@ -357,25 +350,16 @@ impl Expander {
                 })
             })
     }
-    pub fn add_binding(
-        &mut self,
-        id: Syntax<Symbol>,
-        phase: Phase,
-        binding: Binding,
-    ) -> Result<(), String> {
+
+    pub fn add_binding(id: Syntax<Symbol>, phase: Phase, binding: Binding) -> Result<(), String> {
         let ident = id.0.clone();
-        Self::add_binding_in_scope(self.syntax_scope_set(id, phase), ident, binding)
+        Self::add_binding_in_scope(id.syntax_scope_set(phase), ident, binding)
     }
     /// exactly by default should be false
-    pub fn resolve(
-        &mut self,
-        id: Syntax<Symbol>,
-        phase: Phase,
-        exactly: bool,
-    ) -> Result<Binding, String> {
+    pub fn resolve(id: Syntax<Symbol>, phase: Phase, exactly: bool) -> Result<Binding, String> {
         let sym = id.0.clone();
-        let scopes = self.syntax_scope_set(id, phase);
-        let candidate_ids = self.find_all_matching_bindings(&sym, &scopes);
+        let scopes = id.syntax_scope_set(phase);
+        let candidate_ids = Self::find_all_matching_bindings(&sym, &scopes);
         let max_candidate = candidate_ids
             .clone()
             .max_by_key(|id| id.0.len())
@@ -391,7 +375,6 @@ impl Expander {
     }
 
     fn find_all_matching_bindings<'a>(
-        &'a self,
         id: &'a Symbol,
         scopes: &'a BTreeSet<ScopeNoMultiScope>,
     ) -> impl DoubleEndedIterator<Item = (BTreeSet<ScopeNoMultiScope>, Binding)> + use<'a> + Clone
@@ -413,19 +396,39 @@ fn check_unambiguous<'a>(
 ) -> bool {
     candidate_ids.all(|c_id| c_id.0.is_subset(&max_candidate.0))
 }
-impl Expander {
-    pub fn bound_identifier<T>(
-        &mut self,
-        syntax: &Syntax<T>,
-        other: &Syntax<T>,
+impl<T> Syntax<T> {
+    fn syntax_scope_set(self, phase: Phase) -> BTreeSet<ScopeNoMultiScope> {
+        let scopes = self.1;
+        let multi_scope = self.2;
+        multi_scope.into_iter().fold(scopes, |mut scopes, sms| {
+            scopes.insert(sms.1.multi_scope_to_scope_at_phase(sms.0 - phase));
+            scopes
+        })
+    }
+    // doesn't take an owned value but has to do a lot of copying is this better than just straight
+    // up cloning
+    // also cannot nest one in another k
+    fn syntax_scope_set_ref<U>(
+        &self,
         phase: Phase,
-    ) -> bool
+        k: impl FnOnce(BTreeSet<&ScopeNoMultiScope>) -> U,
+    ) -> U {
+        let multi_scopes: Vec<_> = self
+            .2
+            .iter()
+            .map(|sms| (sms.1.multi_scope_to_scope_at_phase(sms.0 - phase)))
+            .collect();
+        let scopes: BTreeSet<&ScopeNoMultiScope> =
+            BTreeSet::from_iter(self.1.iter().chain(multi_scopes.iter()));
+        k(scopes)
+    }
+    pub fn bound_identifier(&self, other: &Syntax<T>, phase: Phase) -> bool
     where
         T: PartialEq,
     {
-        syntax.0 == other.0
-            && self.syntax_scope_set_ref(syntax, phase, |this, scopes| {
-                this.syntax_scope_set_ref(other, phase, |_, other_scopes| scopes == other_scopes)
+        self.0 == other.0
+            && self.syntax_scope_set_ref(phase, |scopes| {
+                other.syntax_scope_set_ref(phase, |other_scopes| scopes == other_scopes)
             })
     }
 }

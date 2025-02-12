@@ -81,7 +81,18 @@ fn parse_submod_head(pair: Box<crate::ast::Pair>) -> Result<ModulePath, String> 
     }
 }
 fn parse_submod_tail(ty: SubModuleType, tail: Ast) -> Result<ModulePath, String> {
-    todo!()
+    let tail_string = tail.to_string();
+    let tail = tail
+        .to_list_checked()
+        .map_err(|_| format!("submodule path elements are not in a list {tail_string}"))?;
+    tail.into_iter()
+        .map(|s| match s {
+            Ast::String(s) if s.to_string().as_str() == ".." => Ok(SubModulePathElement::Up),
+            Ast::Symbol(s) => Ok(SubModulePathElement::Identifier(s)),
+            o => Err(format!("invalid submodule path element {o}")),
+        })
+        .try_collect()
+        .map(|tail| ModulePath::Submodule(ty, tail))
 }
 
 fn parse_quote(pair: Box<crate::ast::Pair>) -> Result<Symbol, String> {
@@ -172,22 +183,17 @@ fn build_module_name(
             if enclosing.is_empty() {
                 Ok(Some(ResolvedModulePath::Symbol(last.clone())))
             } else {
-                Ok(Some(ResolvedModulePath::List(Into::<Rc<[_]>>::into(
-                    enclosing,
-                ))))
+                Ok(Some(ResolvedModulePath::List(enclosing.into())))
             }
         }
-        Some(ResolvedModulePath::List(enclosing)) => {
-            Ok(Some(ResolvedModulePath::List(Into::<Rc<[_]>>::into(
-                enclosing
-                    .clone()
-                    .into_iter()
-                    .cloned()
-                    .chain(iter::once(s.clone().into()))
-                    .collect_vec()
-                    .as_slice(),
-            ))))
-        }
+        Some(ResolvedModulePath::List(enclosing)) => Ok(Some(ResolvedModulePath::List(
+            enclosing
+                .clone()
+                .into_iter()
+                .cloned()
+                .chain(iter::once(s.clone().into()))
+                .collect(),
+        ))),
     }
 }
 

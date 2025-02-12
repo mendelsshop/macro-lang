@@ -1,3 +1,4 @@
+use crate::UniqueNumberManager;
 use core::fmt;
 use std::{
     cell::RefCell,
@@ -19,7 +20,7 @@ use crate::{
 
 use super::{
     binding::{Binding, CompileTimeBinding, CompileTimeEnvoirnment},
-    duplicate_check::{make_check_no_duplicate_table, DuplicateMap},
+    duplicate_check::{check_no_duplicate_ids, make_check_no_duplicate_table, DuplicateMap},
     expand_context::ExpandContext,
     namespace::NameSpace,
     phase::Phase,
@@ -54,7 +55,7 @@ impl Expander {
     ) -> Result<Ast, String> {
         let id: Syntax<Symbol> = p.0.try_into()?;
         let id_sym = id.0.clone();
-        let binding = self.resolve(id, ctx.phase, false);
+        let binding = Self::resolve(id, ctx.phase, false);
         let binding = binding.and_then(|binding| self.lookup(&binding, &ctx, &id_sym));
         match binding {
             Ok(binding) if !matches!(&binding, CompileTimeBinding::Regular(Ast::Symbol(sym)) if *sym == self.variable) => {
@@ -70,7 +71,7 @@ impl Expander {
         let id = sym
             .clone()
             .datum_to_syntax(scopes, shifted_multi_scope_set, None, None);
-        let binding = self.resolve(id, ctx.phase, false);
+        let binding = Self::resolve(id, ctx.phase, false);
         let transformer = binding.and_then(|binding| self.lookup(&binding, &ctx, &sym))?;
         match transformer {
             CompileTimeBinding::CoreForm(_) if ctx.only_immediate => Ok(s),
@@ -113,7 +114,7 @@ impl Expander {
         s: Ast,
         ctx: &ExpandContext,
     ) -> Result<Ast, String> {
-        let intro_scope = self.scope_creator.new_scope();
+        let intro_scope = UniqueNumberManager::new_scope();
         let intro_s = s.add_scope(intro_scope.clone());
         let uses_s = self.maybe_add_use_site_scope(intro_s, ctx);
         // TODO: transformer might need expand context
@@ -128,7 +129,7 @@ impl Expander {
     fn maybe_add_use_site_scope(&mut self, s: Ast, ctx: &ExpandContext) -> Ast {
         match &ctx.use_site_scopes {
             Some(scopes) => {
-                let sc = self.scope_creator.new_scope();
+                let sc = UniqueNumberManager::new_scope();
 
                 scopes.borrow_mut().insert(sc.clone());
                 s.add_scope(sc)
@@ -137,11 +138,9 @@ impl Expander {
         }
     }
     fn maybe_add_post_site_scope(&self, s: Ast, ctx: &ExpandContext) -> Ast {
-        {
-            match &ctx.post_expansion_scope {
-                Some(sc) => s.add_scope(sc.clone()),
-                None => s,
-            }
+        match &ctx.post_expansion_scope {
+            Some(sc) => s.add_scope(sc.clone()),
+            None => s,
         }
     }
     fn dispatch(
@@ -187,7 +186,7 @@ impl Expander {
             None => self.finish_expanding_body(body_ctx, done_bodys, val_binds, original_syntax),
             Some(body) => {
                 let exp_body = self.expand(body, body_ctx.clone())?;
-                if let Ok(pat) = self.core_form_symbol(exp_body.clone(), phase) {
+                if let Ok(pat) = Self::core_form_symbol(exp_body.clone(), phase) {
                     match pat.0.to_string().as_str() {
                         "begin" => {
                             let m = match_syntax(
@@ -222,16 +221,12 @@ impl Expander {
                                 &body_ctx,
                             );
                             let ids = to_id_list(ids)?;
-                            let new_duplicates = self.check_no_duplicate_ids(
-                                ids.clone(),
-                                phase,
-                                &exp_body,
-                                duplicate,
-                            )?;
+                            let new_duplicates =
+                                check_no_duplicate_ids(ids.clone(), phase, &exp_body, duplicate)?;
                             let keys = ids
                                 .clone()
                                 .into_iter()
-                                .map(|id| self.add_local_binding(id, phase))
+                                .map(|id| Self::add_local_binding(id, phase))
                                 .collect_vec();
 
                             body_ctx.env.0.extend(
@@ -271,15 +266,11 @@ impl Expander {
                                 .into_iter()
                                 .map(std::convert::TryInto::try_into)
                                 .collect::<Result<Vec<_>, _>>()?;
-                            let new_duplicates = self.check_no_duplicate_ids(
-                                ids.clone(),
-                                phase,
-                                &exp_body,
-                                duplicate,
-                            )?;
+                            let new_duplicates =
+                                check_no_duplicate_ids(ids.clone(), phase, &exp_body, duplicate)?;
                             let keys = ids
                                 .into_iter()
-                                .map(|id| self.add_local_binding(id, phase))
+                                .map(|id| Self::add_local_binding(id, phase))
                                 .collect_vec();
                             let vals = self.eval_for_syntaxes_binding(
                                 m("rhs".into()).ok_or("internal error")?,
@@ -335,10 +326,10 @@ impl Expander {
     }
     pub fn core_datum_to_syntax(&self, expr: Ast) -> Ast {
         expr.datum_to_syntax(
-            self.core_syntax.scope_set(),
-            self.core_syntax.shifted_multi_scope_set(),
-            self.core_syntax.syntax_src_loc(),
-            self.core_syntax.properties(),
+            Some(self.core_syntax.1.clone()),
+            Some(self.core_syntax.2.clone()),
+            Some(self.core_syntax.3.clone()),
+            Some(self.core_syntax.4.clone()),
         )
     }
     fn remove_use_site_scopes(&self, syntax: Ast, ctx: &ExpandContext) -> Ast {
@@ -361,7 +352,8 @@ impl Expander {
                 "begin (possibly implicit): the last form is not an expression {s}"
             ));
         }
-        let s_core_syntax = self.core_syntax.clone().syntax_shift_phase_level(phase);
+        let s_core_syntax =
+            Ast::Syntax(Box::new(self.core_syntax.clone())).syntax_shift_phase_level(phase);
 
         let mut scopes = body_ctx.scopes;
         let mut old_use_site_scopes = None;
@@ -414,7 +406,8 @@ impl Expander {
         }
     }
     fn no_binds(&self, done_bodys: Vec<Ast>, phase: Phase) -> Vec<(Vec<Syntax<Symbol>>, Ast)> {
-        let s_core_syntax = self.core_syntax.clone().syntax_shift_phase_level(phase);
+        let s_core_syntax =
+            Ast::Syntax(Box::new(self.core_syntax.clone())).syntax_shift_phase_level(phase);
         done_bodys
             .into_iter()
             .map(|body| {
@@ -439,8 +432,8 @@ impl Expander {
         original_syntax: Ast,
         context: ExpandContext,
     ) -> Result<Ast, String> {
-        let outside_scope = self.scope_creator.new_scope();
-        let inside_scope = self.scope_creator.new_scope();
+        let outside_scope = UniqueNumberManager::new_scope();
+        let inside_scope = UniqueNumberManager::new_scope();
         let init_bodys = bodys
             .map(|body| {
                 Ok(body
@@ -541,7 +534,7 @@ impl Expander {
         ctx: ExpandContext,
     ) -> Result<Ast, String> {
         let id = s.0.clone();
-        let binding = self.resolve(s.clone(), ctx.phase, false);
+        let binding = Self::resolve(s.clone(), ctx.phase, false);
         let s = Ast::Syntax(Box::new(s.with(Ast::Symbol(id.clone()))));
         match binding {
             Ok(binding) => self.dispatch(self.lookup(&binding, &ctx, &id)?, s, ctx),
