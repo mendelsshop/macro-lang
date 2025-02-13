@@ -1,4 +1,8 @@
-use std::{iter, path::Path, rc::Rc};
+use std::{
+    iter,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use itertools::Itertools;
 
@@ -29,15 +33,128 @@ impl TryFrom<Ast> for ModulePath {
 
                 other => Err(format!("invalid module path head: {other}")),
             },
-            Ast::Symbol(symbol) => todo!(),
-            Ast::String(symbol) => todo!(),
+            Ast::Symbol(symbol) => parse_symbol_path(symbol),
+            Ast::String(symbol) => parse_string_path(&symbol, true, true, true)
+                .map(RootModulePath::File)
+                .map(Self::Root),
             other => Err(format!("invalid module path: {other}")),
         }
     }
 }
 
 fn parse_lib(pair: Box<Pair>) -> Result<RootModulePath, String> {
-    todo!()
+    if let Ast::Pair(inner_pair) = pair.1 {
+        let first = parse_string_path_ast(inner_pair.0, false, true, true)
+            .map_err(|e| format!("invalid module path lib form {e}"))?;
+        let pair_string = format!("{} is not a list", inner_pair.1);
+        let rest = inner_pair
+            .1
+            .map_to_list_checked(|x| {
+                parse_string_path_ast(x, false, false, false).map(LibraryRelativePath)
+            })
+            .map_err(|e| format!("invalid module path lib form: {}", e.unwrap_or(pair_string)))?;
+        Ok(RootModulePath::Lib(LibraryRelativePath(first), rest.into()))
+    } else {
+        Err(format!(
+            "invalid module path lib form must have at least one element {}",
+            Ast::Pair(pair)
+        ))
+    }
+}
+fn parse_string_path_ast(
+    pair: Ast,
+    dot_dirs_ok: bool,
+    just_file_ok: bool,
+    file_end_ok: bool,
+) -> Result<Rc<Path>, String> {
+    if let Ast::String(s) = pair {
+        parse_string_path(&s, dot_dirs_ok, just_file_ok, file_end_ok)
+    } else {
+        Err(format!("path is not a string {pair}"))
+    }
+}
+fn parse_string_path(
+    pair: &str,
+    dot_dirs_ok: bool,
+    just_file_ok: bool,
+    file_end_ok: bool,
+) -> Result<Rc<Path>, String> {
+    let mut path_iter = pair.chars().peekable();
+    enum State {
+        Start,
+        DotEnd,
+        PathItem(String),
+        PathItemExt(String, String),
+        Slashed,
+        Dot,
+    }
+
+    path_iter
+        .try_fold(
+            (PathBuf::new(), State::Start),
+            |(mut path_buf, state), c| match state {
+                State::Start if c == '.' && dot_dirs_ok => Ok((path_buf, State::Dot)),
+                State::Start if c == '/' => {
+                    Err(format!("path string cannot start with a / {pair}"))
+                }
+                State::Start => todo!(),
+
+                State::Slashed if c == '.' && dot_dirs_ok => Ok((path_buf, State::Dot)),
+                State::Slashed if c == '/' => {
+                    Err(format!("path string contain multiple /s in a row {pair}"))
+                }
+                State::Slashed => todo!(),
+                State::DotEnd if c == '/' => {
+                    path_buf.push("..");
+                    Ok((path_buf, State::Slashed))
+                }
+                State::DotEnd => Err(format!(".. must be followed by /")),
+                State::PathItem(str) if c == '.' && file_end_ok => {
+                    Ok((path_buf, State::PathItemExt(str, "".to_string())))
+                }
+
+                State::PathItem(str) if c == '/' => {
+                    path_buf.push(format!("{str}.rkt"));
+                    Ok((path_buf, State::Slashed))
+                }
+                State::PathItem(str) => todo!(),
+                State::PathItemExt(_, e) if c == '/' && e.is_empty() => {
+                    Err(format!("path string missing extension {pair}"))
+                }
+                State::PathItemExt(s, e) if c == '/' => {
+                    path_buf.push(format!("{s}.{}", if e == "ss" { "rkt" } else { &e }));
+                    Ok((path_buf, State::Slashed))
+                }
+                State::PathItemExt(_, _) => todo!(),
+
+                State::Dot if c == '.' => Ok((path_buf, State::DotEnd)),
+                State::Dot if c == '/' => {
+                    path_buf.push(".");
+                    Ok((path_buf, State::Slashed))
+                }
+                State::Dot => Err(format!("path string . must be followed by . or /")),
+            },
+        )
+        .and_then(|(mut p, s)| match s {
+            State::Start => Err(format!("path string is empty")),
+            State::DotEnd => Ok(p.into()),
+            State::PathItem(s) => {
+                p.push(format!("{s}.rkt"));
+                Ok(p.into())
+            }
+            State::PathItemExt(_, e) if e.is_empty() => {
+                Err(format!("path string missing extension {pair}"))
+            }
+            State::PathItemExt(s, e) => {
+                p.push(format!("{s}.{}", if e == "ss" { "rkt" } else { &e }));
+                Ok(p.into())
+            }
+            State::Slashed => Err(format!("path string cannot end with / {pair}")),
+            State::Dot => {
+                p.push(".");
+                Ok(p.into())
+            }
+        })
 }
 
 fn parse_submod(pair: Box<crate::ast::Pair>) -> Result<ModulePath, String> {
@@ -75,10 +192,19 @@ fn parse_submod_head(pair: Box<crate::ast::Pair>) -> Result<ModulePath, String> 
         Ast::String(symbol) if symbol.to_string().as_str() == "." => {
             parse_submod_tail(SubModuleType::Current, tail)
         }
-        Ast::Symbol(symbol) => todo!(),
-        Ast::String(symbol) => todo!(),
+        Ast::Symbol(symbol) => parse_symbol_path(symbol),
+        Ast::String(symbol) => parse_string_path(&symbol, true, true, true)
+            .map(RootModulePath::File)
+            .map(ModulePath::Root),
         other => Err(format!("invalid submodule path: {other}")),
     }
+}
+
+fn parse_symbol_path(symbol: Symbol) -> Result<ModulePath, String> {
+    parse_string_path(&symbol.to_string(), false, false, false)
+        .map(LibraryRelativePath)
+        .map(|p| RootModulePath::Lib(p, Rc::new([])))
+        .map(ModulePath::Root)
 }
 fn parse_submod_tail(ty: SubModuleType, tail: Ast) -> Result<ModulePath, String> {
     let tail_string = tail.to_string();
@@ -217,6 +343,8 @@ pub enum RootModulePath {
     Lib(LibraryRelativePath, Rc<[LibraryRelativePath]>),
     // from (quote id)
     Identifier(Symbol),
+    // from rel-string
+    File(Rc<Path>),
 }
 
 #[derive(Debug, Clone)]
