@@ -249,7 +249,11 @@ impl From<f64> for Ast {
 }
 impl fmt::Display for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", self.0, self.1)
+        if self.1 == 0 {
+            write!(f, "{}", self.0)
+        } else {
+            write!(f, "{}{}", self.0, self.1)
+        }
     }
 }
 
@@ -381,6 +385,34 @@ impl Ast {
             },
             Vec::new(),
         )
+    }
+    pub fn map_to_list_checked<T>(
+        self,
+        mut f: impl FnMut(Ast) -> Result<T, String>,
+    ) -> Result<Vec<T>, Option<String>> {
+        {
+            let init = Vec::new();
+            self.foldl_pair(
+                |term, base, init: Result<Vec<T>, Option<String>>| {
+                    if !base {
+                        init.and_then(|mut init| {
+                            f(term)
+                                .map(|x| {
+                                    init.push(x);
+                                    init
+                                })
+                                .map_err(Some)
+                        })
+                    } else {
+                        match term {
+                            Self::TheEmptyList => init,
+                            _other => Err(None),
+                        }
+                    }
+                },
+                Ok(init),
+            )
+        }
     }
     pub fn to_list_checked(self) -> Result<Vec<Self>, String> {
         self.foldl(

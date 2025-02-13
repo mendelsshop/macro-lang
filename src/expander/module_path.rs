@@ -34,7 +34,7 @@ impl TryFrom<Ast> for ModulePath {
                 other => Err(format!("invalid module path head: {other}")),
             },
             Ast::Symbol(symbol) => parse_symbol_path(symbol),
-            Ast::String(symbol) => parse_string_path(&symbol, true, true, true)
+            Ast::String(symbol) => parse_string_path(&symbol, true, true)
                 .map(RootModulePath::File)
                 .map(Self::Root),
             other => Err(format!("invalid module path: {other}")),
@@ -44,13 +44,13 @@ impl TryFrom<Ast> for ModulePath {
 
 fn parse_lib(pair: Box<Pair>) -> Result<RootModulePath, String> {
     if let Ast::Pair(inner_pair) = pair.1 {
-        let first = parse_string_path_ast(inner_pair.0, false, true, true)
+        let first = parse_string_path_ast(inner_pair.0, false, true)
             .map_err(|e| format!("invalid module path lib form {e}"))?;
         let pair_string = format!("{} is not a list", inner_pair.1);
         let rest = inner_pair
             .1
             .map_to_list_checked(|x| {
-                parse_string_path_ast(x, false, false, false).map(LibraryRelativePath)
+                parse_string_path_ast(x, false, false).map(LibraryRelativePath)
             })
             .map_err(|e| format!("invalid module path lib form: {}", e.unwrap_or(pair_string)))?;
         Ok(RootModulePath::Lib(LibraryRelativePath(first), rest.into()))
@@ -64,21 +64,15 @@ fn parse_lib(pair: Box<Pair>) -> Result<RootModulePath, String> {
 fn parse_string_path_ast(
     pair: Ast,
     dot_dirs_ok: bool,
-    just_file_ok: bool,
     file_end_ok: bool,
 ) -> Result<Rc<Path>, String> {
     if let Ast::String(s) = pair {
-        parse_string_path(&s, dot_dirs_ok, just_file_ok, file_end_ok)
+        parse_string_path(&s, dot_dirs_ok, file_end_ok)
     } else {
         Err(format!("path is not a string {pair}"))
     }
 }
-fn parse_string_path(
-    pair: &str,
-    dot_dirs_ok: bool,
-    just_file_ok: bool,
-    file_end_ok: bool,
-) -> Result<Rc<Path>, String> {
+fn parse_string_path(pair: &str, dot_dirs_ok: bool, file_end_ok: bool) -> Result<Rc<Path>, String> {
     let mut path_iter = pair.chars().peekable();
     enum State {
         Start,
@@ -89,6 +83,7 @@ fn parse_string_path(
         Dot,
     }
 
+    // TODO: %
     path_iter
         .try_fold(
             (PathBuf::new(), State::Start),
@@ -97,13 +92,19 @@ fn parse_string_path(
                 State::Start if c == '/' => {
                     Err(format!("path string cannot start with a / {pair}"))
                 }
-                State::Start => todo!(),
+                State::Start if is_file_character(c) => {
+                    Ok((path_buf, State::PathItem(c.to_string())))
+                }
+                State::Start => Err(format!("bad path string character {c}")),
 
                 State::Slashed if c == '.' && dot_dirs_ok => Ok((path_buf, State::Dot)),
                 State::Slashed if c == '/' => {
                     Err(format!("path string contain multiple /s in a row {pair}"))
                 }
-                State::Slashed => todo!(),
+                State::Slashed if is_file_character(c) => {
+                    Ok((path_buf, State::PathItem(c.to_string())))
+                }
+                State::Slashed => Err(format!("bad path string character {c}")),
                 State::DotEnd if c == '/' => {
                     path_buf.push("..");
                     Ok((path_buf, State::Slashed))
@@ -117,15 +118,24 @@ fn parse_string_path(
                     path_buf.push(format!("{str}.rkt"));
                     Ok((path_buf, State::Slashed))
                 }
-                State::PathItem(str) => todo!(),
-                State::PathItemExt(_, e) if c == '/' && e.is_empty() => {
-                    Err(format!("path string missing extension {pair}"))
+                State::PathItem(mut str) if is_file_character(c) => {
+                    str.push(c);
+                    Ok((path_buf, State::PathItem(str)))
                 }
-                State::PathItemExt(s, e) if c == '/' => {
-                    path_buf.push(format!("{s}.{}", if e == "ss" { "rkt" } else { &e }));
-                    Ok((path_buf, State::Slashed))
+                State::PathItem(_) => Err(format!("bad path string character {c}")),
+                State::PathItemExt(_, _) if c == '/' => {
+                    Err(format!("path string cannot end with / {pair}"))
                 }
-                State::PathItemExt(_, _) => todo!(),
+
+                State::PathItemExt(s, ext) if c == '.' => Ok((
+                    path_buf,
+                    State::PathItemExt(format!("{s}.{ext}"), "".to_string()),
+                )),
+                State::PathItemExt(s, mut ext) if is_file_character(c) => {
+                    ext.push(c);
+                    Ok((path_buf, State::PathItemExt(s, ext)))
+                }
+                State::PathItemExt(_, _) => Err(format!("bad path string character {c}")),
 
                 State::Dot if c == '.' => Ok((path_buf, State::DotEnd)),
                 State::Dot if c == '/' => {
@@ -155,6 +165,10 @@ fn parse_string_path(
                 Ok(p.into())
             }
         })
+}
+
+fn is_file_character(c: char) -> bool {
+    c.is_ascii_alphanumeric() | ['+', '_', '-'].contains(&c)
 }
 
 fn parse_submod(pair: Box<crate::ast::Pair>) -> Result<ModulePath, String> {
@@ -193,7 +207,7 @@ fn parse_submod_head(pair: Box<crate::ast::Pair>) -> Result<ModulePath, String> 
             parse_submod_tail(SubModuleType::Current, tail)
         }
         Ast::Symbol(symbol) => parse_symbol_path(symbol),
-        Ast::String(symbol) => parse_string_path(&symbol, true, true, true)
+        Ast::String(symbol) => parse_string_path(&symbol, true, true)
             .map(RootModulePath::File)
             .map(ModulePath::Root),
         other => Err(format!("invalid submodule path: {other}")),
@@ -201,7 +215,7 @@ fn parse_submod_head(pair: Box<crate::ast::Pair>) -> Result<ModulePath, String> 
 }
 
 fn parse_symbol_path(symbol: Symbol) -> Result<ModulePath, String> {
-    parse_string_path(&symbol.to_string(), false, false, false)
+    parse_string_path(&symbol.to_string(), false, false)
         .map(LibraryRelativePath)
         .map(|p| RootModulePath::Lib(p, Rc::new([])))
         .map(ModulePath::Root)
