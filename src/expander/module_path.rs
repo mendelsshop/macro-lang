@@ -260,7 +260,7 @@ fn parse_quote(pair: Box<crate::ast::Pair>) -> Result<Symbol, String> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ResolvedModulePath {
     Symbol(Symbol),
     List(Rc<[Symbol]>),
