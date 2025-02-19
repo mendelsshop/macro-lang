@@ -114,7 +114,7 @@ impl Expander {
         try_match_syntax(s, sexpr!((id . "_"))).and_then(|f| {
             // could this also be a plain symbol?
             let sym: Syntax<Symbol> = f("id".into()).ok_or("internal error")?.try_into()?;
-            let b = Self::resolve(sym.clone(), phase, false).inspect_err(|e| {
+            let b = Self::resolve(&sym, phase, false).inspect_err(|e| {
                 dbg!(format!("{e}"));
             })?;
             match b {

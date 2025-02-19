@@ -54,8 +54,8 @@ impl Expander {
         ctx: ExpandContext,
     ) -> Result<Ast, String> {
         let id: Syntax<Symbol> = p.0.try_into()?;
-        let id_sym = id.0.clone();
-        let binding = Self::resolve(id, ctx.phase, false);
+        let id_sym = &id.0;
+        let binding = Self::resolve(&id, ctx.phase, false);
         let binding = binding.and_then(|binding| self.lookup(&binding, &ctx, &id_sym));
         match binding {
             Ok(binding) if !matches!(&binding, CompileTimeBinding::Regular(Ast::Symbol(sym)) if *sym == self.variable) => {
@@ -71,7 +71,7 @@ impl Expander {
         let id = sym
             .clone()
             .datum_to_syntax(scopes, shifted_multi_scope_set, None, None);
-        let binding = Self::resolve(id, ctx.phase, false);
+        let binding = Self::resolve(&id, ctx.phase, false);
         let transformer = binding.and_then(|binding| self.lookup(&binding, &ctx, &sym))?;
         match transformer {
             CompileTimeBinding::CoreForm(_) if ctx.only_immediate => Ok(s),
@@ -534,7 +534,7 @@ impl Expander {
         ctx: ExpandContext,
     ) -> Result<Ast, String> {
         let id = s.0.clone();
-        let binding = Self::resolve(s.clone(), ctx.phase, false);
+        let binding = Self::resolve(&s, ctx.phase, false);
         let s = Ast::Syntax(Box::new(s.with(Ast::Symbol(id.clone()))));
         match binding {
             Ok(binding) => self.dispatch(self.lookup(&binding, &ctx, &id)?, s, ctx),

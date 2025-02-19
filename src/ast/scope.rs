@@ -356,10 +356,10 @@ impl Expander {
         Self::add_binding_in_scope(id.syntax_scope_set(phase), ident, binding)
     }
     /// exactly by default should be false
-    pub fn resolve(id: Syntax<Symbol>, phase: Phase, exactly: bool) -> Result<Binding, String> {
-        let sym = id.0.clone();
-        let scopes = id.syntax_scope_set(phase);
-        let candidate_ids = Self::find_all_matching_bindings(&sym, &scopes);
+    pub fn resolve(id: &Syntax<Symbol>, phase: Phase, exactly: bool) -> Result<Binding, String> {
+        let sym = &id.0;
+        let scopes = id.clone().syntax_scope_set(phase);
+        let candidate_ids = Self::find_all_matching_bindings(sym, &scopes);
         let max_candidate = candidate_ids
             .clone()
             .max_by_key(|id| id.0.len())
