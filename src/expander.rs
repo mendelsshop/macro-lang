@@ -28,6 +28,7 @@ pub mod module_path;
 mod namespace;
 pub mod phase;
 mod require_and_provide;
+mod expand_requires;
 pub struct Expander {
     core_forms: HashMap<Rc<str>, CoreForm>,
     core_primitives: HashMap<Rc<str>, Ast>,
