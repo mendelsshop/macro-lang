@@ -3,11 +3,12 @@ use std::collections::HashSet;
 use crate::ast::{syntax::Syntax, Ast, Symbol};
 
 use super::{
-    binding::ModuleBinding,
-    module_path::ResolvedModulePath,
+    binding::{Binding, ModuleBinding},
+    module_path::{ModulePath, ResolvedModulePath},
     namespace::{NameSpace, ResolvedModuleName},
     phase::Phase,
     require_and_provide::RequiresAndProvides,
+    Expander,
 };
 
 pub enum Adjust {
@@ -97,14 +98,66 @@ fn perform_require(
     run: bool,
     can_shadow: bool,
 ) -> Result<(), String> {
-    Ok(())
+    let module_name = ModulePath::try_from(module_path)?.resolve_module_path(this)?;
+    let bind_in_syntax = if let Some(Adjust::Rename { ref to_id, .. }) = adjust {
+        Ast::Syntax(Box::new(to_id.clone().map(Ast::Symbol)))
+    } else {
+        in_syntax
+    };
+
+    // TODO: unify resolved module path and resovled module name
+    bind_all_provides(
+        bind_in_syntax,
+        phase_shift,
+        module_namespace,
+        module_name,
+        |_| None,
+    )
 }
 fn bind_all_provides(
     in_syntax: Ast,
     phase_shift: Phase,
     namespace: NameSpace,
     module_name: ResolvedModuleName,
-    filter: impl FnMut(ModuleBinding) -> Option<Symbol>,
+    mut filter: impl FnMut(&ModuleBinding) -> Option<Symbol>,
 ) -> Result<(), String> {
+    let module = namespace
+        .namespace_to_module(&module_name)
+        .ok_or(format!("module not declared: {module_name}"))?;
+    let this = &module.self_name;
+    module
+        .provides
+        .clone()
+        .into_iter()
+        .for_each(|(provide_level_phase, provides)| {
+            let phase = phase_shift + provide_level_phase;
+            provides.into_iter().for_each(|(symbol, binding)| {
+                let from_module = &binding.from_module;
+                let binding = ModuleBinding {
+                    from_module: if from_module == this {
+                        module_name.clone()
+                    } else {
+                        from_module.clone()
+                    },
+                    norminal_from_module: module_name.clone(),
+                    norminal_from_phase: provide_level_phase,
+                    norminal_from_symbol: symbol,
+                    norminal_require_phase: phase_shift,
+                    ..binding
+                };
+                if let Some(sym) = filter(&binding) {
+                    Expander::add_binding(
+                        sym.datum_to_syntax(
+                            in_syntax.scope_set(),
+                            in_syntax.shifted_multi_scope_set(),
+                            None,
+                            None,
+                        ),
+                        phase,
+                        Binding::Module(binding),
+                    );
+                }
+            });
+        });
     Ok(())
 }

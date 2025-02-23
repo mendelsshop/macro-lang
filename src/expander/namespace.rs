@@ -6,9 +6,8 @@ use crate::ast::{
 };
 
 use super::{
-    binding::{Binding, CompileTimeBinding},
+    binding::{CompileTimeBinding, ModuleBinding},
     phase::Phase,
-    Expander,
 };
 
 pub type ResolvedModuleName = Symbol;
@@ -18,7 +17,8 @@ pub struct Module {
     // immutable
     pub requires: HashMap<Phase, Vec<ResolvedModuleName>>,
     // immutable
-    pub provides: HashMap<Phase, HashMap<Symbol, Binding>>,
+    // TODO: should this allow non module bindings
+    pub provides: HashMap<Phase, HashMap<Symbol, ModuleBinding>>,
     pub min_phase_level: Phase,
     pub max_phase_level: Phase,
     pub instantiate: Rc<dyn Fn(NameSpace, Phase, Phase)>,
@@ -41,7 +41,7 @@ impl Module {
     pub fn new(
         self_name: Symbol,
         requires: HashMap<Phase, Vec<ResolvedModuleName>>,
-        provides: HashMap<Phase, HashMap<Symbol, Binding>>,
+        provides: HashMap<Phase, HashMap<Symbol, ModuleBinding>>,
         min_phase_level: Phase,
         max_phase_level: Phase,
         instantiate: Rc<dyn Fn(NameSpace, Phase, Phase)>,
@@ -108,7 +108,7 @@ impl NameSpace {
             .insert((name, Phase(0)), module_namespace.clone());
         module_namespace
     }
-    fn namespace_to_module(&self, name: &ResolvedModuleName) -> Option<Ref<'_, Module>> {
+    pub fn namespace_to_module(&self, name: &ResolvedModuleName) -> Option<Ref<'_, Module>> {
         {
             self.module_declarations
                 .get(name)

@@ -35,6 +35,18 @@ impl<T: Debug> Debug for Syntax<T> {
 }
 
 impl<T> Syntax<T> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Syntax<U> {
+        Syntax(f(self.0), self.1, self.2, self.3, self.4)
+    }
+    pub fn map_ref<U>(&self, f: impl FnOnce(&T) -> U) -> Syntax<U> {
+        Syntax(
+            f(&self.0),
+            self.1.clone(),
+            self.2.clone(),
+            self.3.clone(),
+            self.4.clone(),
+        )
+    }
     // TODO: make with take &self so we only need to clone properties srcloc scopes
     pub fn with<U>(self, other: U) -> Syntax<U> {
         Syntax(other, self.1, self.2, self.3, self.4)
