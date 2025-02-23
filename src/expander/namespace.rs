@@ -7,10 +7,11 @@ use crate::ast::{
 
 use super::{
     binding::{CompileTimeBinding, ModuleBinding},
+    module_path::ResolvedModulePath,
     phase::Phase,
 };
 
-pub type ResolvedModuleName = Symbol;
+pub type ResolvedModuleName = ResolvedModulePath;
 #[derive(Clone)]
 pub struct Module {
     pub self_name: ResolvedModuleName,
@@ -39,7 +40,7 @@ impl std::fmt::Debug for Module {
 // TODO: some of these hashmaps are cells, do we have to use internal mutablitly with MutableMap?
 impl Module {
     pub fn new(
-        self_name: Symbol,
+        self_name: ResolvedModulePath,
         requires: HashMap<Phase, Vec<ResolvedModuleName>>,
         provides: HashMap<Phase, HashMap<Symbol, ModuleBinding>>,
         min_phase_level: Phase,
@@ -125,8 +126,8 @@ impl NameSpace {
         .insert(name, m);
     }
 
-    // min_phase: defualts to Phase(0)
-    fn namespace_module_instantiate(
+    /// min_phase: defualts to Phase(0)
+    pub fn namespace_module_instantiate(
         &self,
         name: &ResolvedModuleName,
         phase_shift: Phase,
@@ -173,7 +174,7 @@ impl NameSpace {
         Ok(())
     }
 
-    fn namespace_module_visit(
+    pub fn namespace_module_visit(
         &self,
         name: &ResolvedModuleName,
         phase: Phase,

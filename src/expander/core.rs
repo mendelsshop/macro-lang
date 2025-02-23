@@ -10,6 +10,7 @@ use crate::{
 
 use super::{
     binding::{Binding, CompileTimeBinding, CoreForm, ModuleBinding},
+    module_path::ResolvedModulePath,
     namespace::{Module, NameSpace},
     phase::Phase,
     r#match::try_match_syntax,
@@ -48,7 +49,7 @@ impl Expander {
         self.core_primitives.insert(sym, proc);
     }
 
-    pub fn declare_core_top_level(&mut self, ns: &NameSpace) {
+    pub fn declare_core_module(&mut self, ns: &NameSpace) {
         let primitives = self.core_primitives.clone();
         let transformers = self.core_forms.clone();
         ns.declare_module(
@@ -65,7 +66,7 @@ impl Expander {
                             let sym = sym.clone();
                             (
                                 sym.clone().into(),
-                                Binding::Module(ModuleBinding {
+                                ModuleBinding {
                                     from_module: "#%core".into(),
                                     from_phase: Phase(0),
                                     from_symbol: sym.clone().into(),
@@ -73,7 +74,7 @@ impl Expander {
                                     norminal_from_phase: Phase(0),
                                     norminal_from_symbol: sym.into(),
                                     norminal_require_phase: Phase(0),
-                                }),
+                                },
                             )
                         })
                         .collect(),
@@ -118,8 +119,12 @@ impl Expander {
                 dbg!(format!("{e}"));
             })?;
             match b {
-                Binding::Local(_) => Err(format!("{sym} is not a core form")),
-                Binding::Module(s) => Ok(s.from_module),
+                Binding::Module(s)
+                    if s.from_module == ResolvedModulePath::Symbol("#%core".into()) =>
+                {
+                    Ok(s.from_symbol)
+                }
+                _ => Err(format!("{sym} is not a core form")),
             }
         })
     }

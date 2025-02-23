@@ -22,13 +22,13 @@ mod duplicate_check;
 pub mod expand;
 mod expand_context;
 mod expand_expr;
+mod expand_requires;
 mod expand_top_level;
 mod r#match;
 pub mod module_path;
 mod namespace;
 pub mod phase;
 mod require_and_provide;
-mod expand_requires;
 pub struct Expander {
     core_forms: HashMap<Rc<str>, CoreForm>,
     core_primitives: HashMap<Rc<str>, Ast>,
@@ -68,7 +68,7 @@ impl Expander {
     }
     pub fn namespace(&mut self) -> NameSpace {
         let mut ns = NameSpace::default();
-        self.declare_core_top_level(&mut ns);
+        self.declare_core_module(&mut ns);
         ns
     }
     pub fn introduce<T: AdjustScope>(&self, s: T) -> T {

@@ -98,27 +98,36 @@ fn perform_require(
     run: bool,
     can_shadow: bool,
 ) -> Result<(), String> {
-    let module_name = ModulePath::try_from(module_path)?.resolve_module_path(this)?;
+    let module_name = ModulePath::try_from(module_path)?
+        .resolve_module_path(this)?
+        .ok_or(format!(""))?;
     let bind_in_syntax = if let Some(Adjust::Rename { ref to_id, .. }) = adjust {
         Ast::Syntax(Box::new(to_id.clone().map(Ast::Symbol)))
     } else {
         in_syntax
     };
 
+    let mut done_symbols: HashSet<Symbol> = HashSet::new();
+    requires_and_provide.add_required_module(module_name.clone(), phase_shift);
     // TODO: unify resolved module path and resovled module name
     bind_all_provides(
         bind_in_syntax,
         phase_shift,
-        module_namespace,
-        module_name,
+        &module_namespace,
+        &module_name,
         |_| None,
-    )
+    )?;
+    module_namespace.namespace_module_visit(&module_name, phase_shift)?;
+    if run {
+        module_namespace.namespace_module_instantiate(&module_name, phase_shift, Phase(0))?;
+    }
+    todo!()
 }
 fn bind_all_provides(
     in_syntax: Ast,
     phase_shift: Phase,
-    namespace: NameSpace,
-    module_name: ResolvedModuleName,
+    namespace: &NameSpace,
+    module_name: &ResolvedModuleName,
     mut filter: impl FnMut(&ModuleBinding) -> Option<Symbol>,
 ) -> Result<(), String> {
     let module = namespace

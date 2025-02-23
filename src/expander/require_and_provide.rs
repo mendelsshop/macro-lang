@@ -4,11 +4,12 @@ use crate::ast::{scope::MutableMap, syntax::Syntax, Ast, Symbol};
 
 use super::{
     binding::{Binding, ModuleBinding},
+    namespace::ResolvedModuleName,
     phase::Phase,
     Expander,
 };
 
-type ModuleName = Symbol;
+type ModuleName = ResolvedModuleName;
 #[derive(Default, Clone, Debug)]
 pub struct RequiresAndProvides {
     requires: MutableMap<ModuleName, HashMap<Phase, Vec<Required>>>,
@@ -16,7 +17,7 @@ pub struct RequiresAndProvides {
 }
 
 impl RequiresAndProvides {
-    fn add_required_module(&self, module: ModuleName, phase: Phase) {
+    pub fn add_required_module(&self, module: ModuleName, phase: Phase) {
         self.requires
             .entry(module, |e| e.or_default().insert(phase, vec![]));
     }

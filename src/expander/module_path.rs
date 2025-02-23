@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{
     iter,
     path::{Path, PathBuf},
@@ -260,10 +261,25 @@ fn parse_quote(pair: Box<crate::ast::Pair>) -> Result<Symbol, String> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ResolvedModulePath {
     Symbol(Symbol),
     List(Rc<[Symbol]>),
+}
+impl fmt::Display for ResolvedModulePath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResolvedModulePath::Symbol(symbol) => write!(f, "{symbol}"),
+            ResolvedModulePath::List(symbols) => {
+                write!(f, "({})", symbols.iter().map(|s| s.to_string()).join(" "))
+            }
+        }
+    }
+}
+impl From<&str> for ResolvedModulePath {
+    fn from(value: &str) -> Self {
+        Self::Symbol(value.into())
+    }
 }
 impl ModulePath {
     pub fn resolve_module_path(

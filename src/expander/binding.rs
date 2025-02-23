@@ -5,9 +5,12 @@ use crate::{
     UniqueNumberManager,
 };
 
-use super::{expand_context::ExpandContext, namespace::NameSpace, phase::Phase, Expander};
+use super::{
+    expand_context::ExpandContext, module_path::ResolvedModulePath, namespace::NameSpace,
+    phase::Phase, Expander,
+};
 
-pub type ModulePathIndex = Symbol;
+pub type ModulePathIndex = ResolvedModulePath;
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ModuleBinding {
     pub from_module: ModulePathIndex,
@@ -105,9 +108,7 @@ impl CompileTimeEnvoirnment {
     }
 }
 impl Syntax<Symbol> {
-    pub fn free_identifier(self, b: Syntax<Symbol>, phase: Phase) -> bool {
-        let a_sym = self.0.clone();
-        let b_sym = b.0.clone();
+    pub fn free_identifier(&self, b: &Syntax<Symbol>, phase: Phase) -> bool {
         let ab = Expander::resolve(self, phase, false);
         let bb = Expander::resolve(b, phase, false);
         match (ab, bb) {
@@ -117,7 +118,7 @@ impl Syntax<Symbol> {
                     && f0_self.from_phase == f0_other.from_phase
                     && f0_self.from_symbol == f0_other.from_symbol
             }
-            _ => a_sym == b_sym,
+            _ => self.0 == b.0,
         }
     }
 }
