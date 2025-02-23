@@ -10,7 +10,7 @@ use super::{
 
 type ModuleName = Symbol;
 #[derive(Default, Clone, Debug)]
-struct RequiresAndProvides {
+pub struct RequiresAndProvides {
     requires: MutableMap<ModuleName, HashMap<Phase, Vec<Required>>>,
     provides: MutableMap<Phase, HashMap<Symbol, Binding>>,
 }
