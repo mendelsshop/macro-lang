@@ -11,6 +11,7 @@ use super::{
     Expander,
 };
 
+#[derive(Clone)]
 pub enum Adjust {
     Only {
         symbols: HashSet<Symbol>,
@@ -28,25 +29,141 @@ pub enum Adjust {
     },
 }
 
-const LAYERS: [&str; 4] = ["raw", "raw/no-just-meta", "phaseless", "path"];
+#[derive(PartialEq, Clone, Copy)]
+enum Layer {
+    Raw,
+    RawNoJustMeta,
+    Phaseless,
+    Path,
+}
+const LAYERS: [Layer; 4] = [
+    Layer::Raw,
+    Layer::RawNoJustMeta,
+    Layer::Phaseless,
+    Layer::Path,
+];
 
-fn is_nested(layer: Symbol, want_layer: Symbol) -> bool {
-    want_layer.1 == 0
-        && layer.1 == 0
-        && LAYERS
-            .into_iter()
-            .position(|l| &*layer.0 == l)
-            .is_some_and(|pos| LAYERS.split_at(pos).1.contains(&&*want_layer.0))
+fn is_nested(layer: Layer, want_layer: Layer) -> bool {
+    LAYERS
+        .into_iter()
+        .position(|l| layer == l)
+        .is_some_and(|pos| LAYERS.split_at(pos).1.contains(&want_layer))
 }
 fn parse_and_perform_requires(
     reqs: Ast,
     this: Option<ResolvedModulePath>,
-    module_namespace: NameSpace,
+    module_namespace: &NameSpace,
     phase_shift: Phase,
     requires_and_provide: RequiresAndProvides,
     run: bool,
 ) -> Result<(), String> {
-    Ok(())
+    fn parse_and_perform_requires_loop(
+        reqs: Ast,
+        top_req: Option<&Ast>,
+        phase_shift: Phase,
+        just_meta: JustMeta,
+        adjust: Option<Adjust>,
+        layer: Layer,
+        this: Option<ResolvedModulePath>,
+        module_namespace: &NameSpace,
+        requires_and_provide: RequiresAndProvides,
+        run: bool,
+    ) -> Result<(), String> {
+        reqs.to_list_checked()?.into_iter().try_for_each(|req| {
+            let check_nested = |want_layer| {
+                is_nested(layer, want_layer)
+                    .then_some(())
+                    .ok_or(format!("invalid nesting: {req}"))
+            };
+            let fm: Option<Syntax<Symbol>> = if let Ast::Syntax(ref p) = req {
+                Some(p)
+            } else {
+                None
+            }
+            .and_then(|s| {
+                if let Ast::Pair(ref req) = s.0 {
+                    Some(req)
+                } else {
+                    None
+                }
+            })
+            .and_then(|p| p.0.clone().try_into().ok());
+            match fm {
+                Some(fm) if fm.0 == "for-meta".into() => {
+                    check_nested(Layer::RawNoJustMeta)?;
+                    todo!()
+                }
+                Some(fm) if fm.0 == "for-syntax".into() => {
+                    check_nested(Layer::RawNoJustMeta)?;
+                    todo!()
+                }
+                Some(fm) if fm.0 == "for-template".into() => {
+                    check_nested(Layer::RawNoJustMeta)?;
+                    todo!()
+                }
+                Some(fm) if fm.0 == "for-label".into() => {
+                    check_nested(Layer::RawNoJustMeta)?;
+                    todo!()
+                }
+                Some(fm) if fm.0 == "just-meta".into() => {
+                    check_nested(Layer::Raw)?;
+                    todo!()
+                }
+                Some(fm) if fm.0 == "only".into() => {
+                    check_nested(Layer::Phaseless)?;
+                    todo!()
+                }
+                Some(fm) if fm.0 == "prefix".into() => {
+                    check_nested(Layer::Phaseless)?;
+                    todo!()
+                }
+                Some(fm) if fm.0 == "all-except".into() => {
+                    check_nested(Layer::Phaseless)?;
+                    todo!()
+                }
+                Some(fm) if fm.0 == "prefix-all-except".into() => {
+                    check_nested(Layer::Phaseless)?;
+                    todo!()
+                }
+                Some(fm) if fm.0 == "rename".into() => {
+                    check_nested(Layer::Phaseless)?;
+                    todo!()
+                }
+                _ => {
+                    let module_path = req
+                        .clone()
+                        .syntax_to_datum()
+                        .try_into()
+                        .map_err(|_| format!("bad require spec: {req}"))?;
+
+                    perform_require(
+                        module_path,
+                        this.clone(),
+                        top_req.unwrap_or(&req),
+                        module_namespace.clone(),
+                        phase_shift,
+                        just_meta,
+                        adjust.clone(),
+                        requires_and_provide.clone(),
+                        run,
+                        false,
+                    )
+                }
+            }
+        })
+    }
+    parse_and_perform_requires_loop(
+        reqs,
+        None,
+        phase_shift,
+        JustMeta::All,
+        None,
+        Layer::Raw,
+        this,
+        module_namespace,
+        requires_and_provide,
+        run,
+    )
 }
 fn identifiers_to_symbol_set(ids: Ast) -> Result<HashSet<Symbol>, String> {
     ids.foldl(
@@ -60,7 +177,7 @@ fn identifiers_to_symbol_set(ids: Ast) -> Result<HashSet<Symbol>, String> {
     )?
 }
 fn perform_initial_require(
-    module_path: Ast,
+    module_path: ModulePath,
     this: Option<ResolvedModulePath>,
     in_syntax: &Ast,
     module_namespace: NameSpace,
@@ -80,7 +197,7 @@ fn perform_initial_require(
     )
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum JustMeta {
     All,
     Specific(Phase),
@@ -88,7 +205,7 @@ enum JustMeta {
 /// run: false
 /// can_shadow: false
 fn perform_require(
-    module_path: Ast,
+    module_path: ModulePath,
     this: Option<ResolvedModulePath>,
     in_syntax: &Ast,
     module_namespace: NameSpace,
@@ -99,9 +216,7 @@ fn perform_require(
     run: bool,
     can_shadow: bool,
 ) -> Result<(), String> {
-    let module_name = ModulePath::try_from(module_path)?
-        .resolve_module_path(this)?
-        .ok_or(format!(""))?;
+    let module_name = module_path.resolve_module_path(this)?.ok_or(format!(""))?;
     let bind_in_syntax = if let Some(Adjust::Rename { ref to_id, .. }) = adjust {
         &Ast::Syntax(Box::new(to_id.clone().map(Ast::Symbol)))
     } else {
@@ -125,13 +240,18 @@ fn perform_require(
                 {
                     None
                 }
-                Some(Adjust::Only { symbols }) => symbols.get(symbol).cloned().inspect(|s| {
-                    done_symbols.insert(s.clone());
-                }),
+                Some(Adjust::Only { symbols }) => symbols
+                    .get(symbol)
+                    .cloned()
+                    .inspect(|s| {
+                        done_symbols.insert(s.clone());
+                    })
+                    .map(SymbolOrSyntax::Symbol),
                 // TODO: symbol number properly
-                Some(Adjust::Prefix { symbol: adjust }) => {
-                    Some(Symbol(format!("{adjust}{}", symbol.0).into(), symbol.1))
-                }
+                Some(Adjust::Prefix { symbol: adjust }) => Some(SymbolOrSyntax::Symbol(Symbol(
+                    format!("{adjust}{}", symbol.0).into(),
+                    symbol.1,
+                ))),
                 Some(Adjust::AllExcept {
                     prefix_symbol,
                     symbols,
@@ -141,31 +261,21 @@ fn perform_require(
                         done_symbols.insert((*s).clone());
                     })
                     .is_none()
-                    .then_some(Symbol(
+                    .then_some(SymbolOrSyntax::Symbol(Symbol(
                         format!("{prefix_symbol}{}", symbol.0).into(),
                         symbol.1,
-                    )),
-                // TODO: to id seems to be a syntax object, does that mean I need to keep the
-                // syntax stuff that was origanlly there, because it passes through a bunch of
-                // datum to syntaxes, maybe just also attach a syntax object with ()
-                Some(Adjust::Rename { to_id, from_symbol }) => {
-                    (from_symbol == symbol).then(|| -> Symbol {
-                        done_symbols.insert(symbol.clone());
-                        to_id.0.clone()
-                    })
-                }
-                None => Some(symbol.clone()),
+                    ))),
+                Some(Adjust::Rename { to_id, from_symbol }) => (from_symbol == symbol).then(|| {
+                    done_symbols.insert(symbol.clone());
+                    SymbolOrSyntax::Syntax(to_id.clone())
+                }),
+                None => Some(SymbolOrSyntax::Symbol(symbol.clone())),
             };
             {
                 let this = adjusted_symbol.as_ref();
                 if let Some(ref adjusted_symbol) = this {
                     {
-                        let s = (*adjusted_symbol).clone().datum_to_syntax(
-                            in_syntax.scope_set(),
-                            in_syntax.shifted_multi_scope_set(),
-                            None,
-                            None,
-                        );
+                        let s = (*adjusted_symbol).clone().datum_to_syntax(in_syntax);
                         let bind_phase = phase_shift + provide_phase;
                         requires_and_provide.check_not_required_or_defined(&s, bind_phase)?;
                         requires_and_provide.add_defined_or_required_id(
@@ -207,12 +317,31 @@ fn perform_require(
         Ok(())
     }
 }
+#[derive(Clone)]
+enum SymbolOrSyntax {
+    Symbol(Symbol),
+    Syntax(Syntax<Symbol>),
+}
+
+impl SymbolOrSyntax {
+    fn datum_to_syntax(self, syntax: &Ast) -> Syntax<Symbol> {
+        match self {
+            Self::Symbol(symbol) => symbol.datum_to_syntax(
+                syntax.scope_set(),
+                syntax.shifted_multi_scope_set(),
+                None,
+                None,
+            ),
+            Self::Syntax(syntax) => syntax,
+        }
+    }
+}
 fn bind_all_provides(
     in_syntax: &Ast,
     phase_shift: Phase,
     namespace: &NameSpace,
     module_name: &ResolvedModuleName,
-    mut filter: impl FnMut(&ModuleBinding) -> Result<Option<Symbol>, String>,
+    mut filter: impl FnMut(&ModuleBinding) -> Result<Option<SymbolOrSyntax>, String>,
 ) -> Result<(), String> {
     let module = namespace
         .namespace_to_module(&module_name)
@@ -240,12 +369,7 @@ fn bind_all_provides(
                 };
                 if let Some(sym) = filter(&binding)? {
                     Expander::add_binding(
-                        sym.datum_to_syntax(
-                            in_syntax.scope_set(),
-                            in_syntax.shifted_multi_scope_set(),
-                            None,
-                            None,
-                        ),
+                        sym.datum_to_syntax(in_syntax),
                         phase,
                         Binding::Module(binding),
                     );
