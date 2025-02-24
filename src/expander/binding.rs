@@ -16,10 +16,10 @@ pub struct ModuleBinding {
     pub from_module: ModulePathIndex,
     pub from_phase: Phase,
     pub from_symbol: Symbol,
-    pub norminal_from_module: ModulePathIndex,
-    pub norminal_from_phase: Phase,
-    pub norminal_from_symbol: Symbol,
-    pub norminal_require_phase: Phase,
+    pub nominal_from_module: ModulePathIndex,
+    pub nominal_from_phase: Phase,
+    pub nominal_from_symbol: Symbol,
+    pub nominal_require_phase: Phase,
 }
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Binding {
@@ -33,7 +33,7 @@ impl fmt::Display for Binding {
             "{}",
             match self {
                 Self::Local(s) => format!("{s}"),
-                Self::Module(s) => format!("{}", s.norminal_from_symbol),
+                Self::Module(s) => format!("{}", s.nominal_from_symbol),
             }
         )
     }
@@ -42,7 +42,7 @@ impl From<Binding> for Symbol {
     fn from(value: Binding) -> Self {
         match value {
             Binding::Local(s) => s,
-            Binding::Module(c) => c.norminal_from_symbol,
+            Binding::Module(c) => c.nominal_from_symbol,
         }
     }
 }

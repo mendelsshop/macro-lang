@@ -22,22 +22,22 @@ impl RequiresAndProvides {
             .entry(module, |e| e.or_default().insert(phase, vec![]));
     }
 
-    fn add_defined_or_required_id(
+    pub fn add_defined_or_required_id(
         &self,
-        phase: Phase,
         id: Syntax<Symbol>,
+        phase: Phase,
         binding: ModuleBinding,
         can_shadow: bool,
     ) -> Result<(), String> {
-        if phase != binding.norminal_from_phase + binding.norminal_require_phase {
+        if phase != binding.nominal_from_phase + binding.nominal_require_phase {
             return Err(format!(
                 "internal error: binding phase does not match nominal phase"
             ));
         }
-        self.requires.entry(binding.norminal_from_module, |at_mod| {
+        self.requires.entry(binding.nominal_from_module, |at_mod| {
             at_mod
                 .or_default()
-                .entry(binding.norminal_require_phase)
+                .entry(binding.nominal_require_phase)
                 .or_default()
                 .insert(
                     0,
@@ -51,15 +51,15 @@ impl RequiresAndProvides {
         Ok(())
     }
 
-    fn check_not_required_or_defined(
+    pub fn check_not_required_or_defined(
         &self,
-        id: Syntax<Symbol>,
+        id: &Syntax<Symbol>,
         phase: Phase,
     ) -> Result<(), String> {
-        if let Binding::Module(b) = Expander::resolve(&id, phase, true)? {
-            if let Some(at_mod) = self.requires.get(&b.norminal_from_module) {
+        if let Binding::Module(b) = Expander::resolve(id, phase, true)? {
+            if let Some(at_mod) = self.requires.get(&b.nominal_from_module) {
                 at_mod
-                    .get(&b.norminal_require_phase)
+                    .get(&b.nominal_require_phase)
                     .into_iter()
                     .flatten()
                     .try_for_each(|require| {

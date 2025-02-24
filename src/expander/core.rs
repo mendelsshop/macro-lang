@@ -32,10 +32,10 @@ impl Expander {
                 from_module: "#%core".into(),
                 from_phase: Phase(0),
                 from_symbol: sym.clone(),
-                norminal_from_module: "#%core".into(),
-                norminal_from_phase: Phase(0),
-                norminal_from_symbol: sym,
-                norminal_require_phase: Phase(0),
+                nominal_from_module: "#%core".into(),
+                nominal_from_phase: Phase(0),
+                nominal_from_symbol: sym,
+                nominal_require_phase: Phase(0),
             }),
         )
     }
@@ -70,10 +70,10 @@ impl Expander {
                                     from_module: "#%core".into(),
                                     from_phase: Phase(0),
                                     from_symbol: sym.clone().into(),
-                                    norminal_from_module: "#%core".into(),
-                                    norminal_from_phase: Phase(0),
-                                    norminal_from_symbol: sym.into(),
-                                    norminal_require_phase: Phase(0),
+                                    nominal_from_module: "#%core".into(),
+                                    nominal_from_phase: Phase(0),
+                                    nominal_from_symbol: sym.into(),
+                                    nominal_require_phase: Phase(0),
                                 },
                             )
                         })
