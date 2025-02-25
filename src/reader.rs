@@ -225,7 +225,12 @@ impl Reader {
                 if end_bracket == expected_end_bracket {
                     Ok((Ast::TheEmptyList, input))
                 } else {
-                    Err((format!("unfinished pair expected {expected_end_bracket} to finish the pair but found {end_bracket}"), input))
+                    Err((
+                        format!(
+                            "unfinished pair expected {expected_end_bracket} to finish the pair but found {end_bracket}"
+                        ),
+                        input,
+                    ))
                 }
             }
             Some('.') => {

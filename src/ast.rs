@@ -206,6 +206,7 @@ pub enum Ast {
     Pair(Box<Pair>),
     TheEmptyList,
     Syntax(Box<Syntax<Ast>>),
+    // TODO: integers/exact numbers
     Number(f64),
     Boolean(bool),
     Symbol(Symbol),

@@ -1,6 +1,7 @@
 use std::ops::{Add, Sub};
 
 #[derive(Hash, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Debug)]
+// TODO: label phase (make into enum)
 pub struct Phase(pub isize);
 
 impl Add for Phase {
