@@ -187,6 +187,9 @@ impl Expander {
         // from expand_top_level
         self.add_core_form("define-values".into(), Self::core_form_define_values);
         self.add_core_form("define-syntaxes".into(), Self::core_form_define_syntaxes);
+        self.add_core_form("begin-for-syntax".into(), Self::core_form_begin_for_syntax);
+        self.add_core_form("#%require".into(), Self::core_form_require);
+        self.add_core_form("#%provide".into(), Self::core_form_define_provide);
     }
 
     fn make_lambda_expander(

@@ -32,6 +32,7 @@ pub enum Adjust {
         from_symbol: Symbol,
     },
 }
+#[macro_export]
 macro_rules! matches_to {
     ($e:expr => $s:path) => {
         match $e {
@@ -72,7 +73,8 @@ fn is_nested(layer: Layer, want_layer: Layer) -> bool {
         .position(|l| layer == l)
         .is_some_and(|pos| LAYERS.split_at(pos).1.contains(&want_layer))
 }
-fn parse_and_perform_requires(
+/// run defaults to false
+pub fn parse_and_perform_requires(
     reqs: Ast,
     this: Option<ResolvedModulePath>,
     module_namespace: &NameSpace,

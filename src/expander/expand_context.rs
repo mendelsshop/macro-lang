@@ -4,7 +4,7 @@ use crate::ast::{scope::Scope, Ast};
 
 use super::{binding::CompileTimeEnvoirnment, namespace::NameSpace, phase::Phase, Expander};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Context {
     Module,
     Expression,
