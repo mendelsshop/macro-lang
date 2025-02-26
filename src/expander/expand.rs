@@ -496,7 +496,7 @@ impl Expander {
         phase: Phase,
         namespace: NameSpace,
     ) -> Result<Vec<Ast>, String> {
-        let compiled = self.compile(exp_rhs.clone(), &namespace, phase)?;
+        let compiled = self.compile(exp_rhs.clone(), &namespace, phase, None)?;
         self.expand_time_eval(compiled).and_then(|values| {
             let list = match values {
                 Values::Many(vec) => vec,

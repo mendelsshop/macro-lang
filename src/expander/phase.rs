@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{
     cmp::Ordering,
     ops::{Add, Sub},
@@ -8,6 +9,14 @@ use std::{
 pub enum Phase {
     Normal(isize),
     Label,
+}
+impl fmt::Display for Phase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Normal(p) => write!(f, "<phase {p}>"),
+            Self::Label => write!(f, "<label phase>"),
+        }
+    }
 }
 
 impl Ord for Phase {

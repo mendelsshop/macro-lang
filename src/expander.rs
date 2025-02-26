@@ -37,6 +37,8 @@ pub struct Expander {
     run_time_env: EnvRef,
     core_syntax: Syntax<Ast>,
     pub(crate) variable: Symbol,
+    pub phase_shift_id: Symbol,
+    pub namespace_id: Symbol,
 }
 
 impl Default for Expander {
@@ -58,6 +60,8 @@ impl Expander {
             run_time_env: Env::new_env(),
             expand_time_env: Env::new_env(),
             variable,
+            phase_shift_id: UniqueNumberManager::gen_sym("phase"),
+            namespace_id: UniqueNumberManager::gen_sym("phase"),
         };
         this.add_core_forms();
         new_primitive_env(|name, primitive| {

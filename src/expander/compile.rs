@@ -8,6 +8,7 @@ use crate::{
 
 use super::{
     binding::Binding,
+    module_path::ResolvedModulePath,
     namespace::NameSpace,
     phase::{self, Phase},
     r#match::match_syntax,
@@ -15,17 +16,24 @@ use super::{
 };
 
 impl Expander {
-    pub fn compile(&self, s: Ast, ns: &NameSpace, phase: Phase) -> Result<Ast, String> {
-        let compile = |s| self.compile(s, ns);
+    pub fn compile(
+        &self,
+        s: Ast,
+        ns: &NameSpace,
+        phase: Phase,
+        self_name: Option<ResolvedModulePath>,
+    ) -> Result<Ast, String> {
+        let compile = |s| self.compile(s, ns, phase, self_name.clone());
         let Ast::Syntax(syntax) = s.clone() else {
             panic!()
         };
         match syntax.0 {
             Ast::Pair(_) => {
-                let core_sym = self
-                    .core_form_symbol(s.clone())
+                let core_sym = Expander::core_form_symbol(s.clone(), phase)
                     .map_err(|_| format!("not a core form {s}"))?;
                 match core_sym.to_string().as_str() {
+                    "module" | "module*" => self.compile_module(s, ns, self_name),
+                    "#%require" => todo!(),
                     "lambda" => {
                         let m = match_syntax(
                             s,
@@ -35,6 +43,8 @@ impl Expander {
                             m("formals".into()).ok_or("internal error")?,
                             m("body".into()).ok_or("internal error")?,
                             ns,
+                            phase,
+                            self_name,
                         )
                         .map(|body| list!("lambda".into(); body))
                     }
@@ -43,7 +53,9 @@ impl Expander {
                         Ast::map2(
                             m("formals".into()).ok_or("internal error")?,
                             m("body".into()).ok_or("internal error")?,
-                            |formals, body| self.compile_lambda(formals, body, ns),
+                            |formals, body| {
+                                self.compile_lambda(formals, body, ns, phase, self_name.clone())
+                            },
                         )
                         .map(|cases| sexpr!(("case-lambda". #(cases))))
                     }
@@ -109,7 +121,9 @@ impl Expander {
                                 .and_then(compile)?,
                         ))
                     }
-                    "let-values" | "letrec-values" => self.compile_let(core_sym, s, ns),
+                    "let-values" | "letrec-values" => {
+                        self.compile_let(core_sym, s, ns, phase, self_name)
+                    }
                     "quote" => {
                         let m = match_syntax(s, list!("quote".into(), "datum".into()))?;
                         m("datum".into())
@@ -121,53 +135,116 @@ impl Expander {
                         let m = match_syntax(s, list!("quote-syntax".into(), "datum".into()))?;
                         m("datum".into())
                             .ok_or("internal error".to_string())
-                            .map(|datum| list!("quote".into(), datum))
+                            .map(|datum| sexpr!((quote #(datum)))).map(|q|
+                                match self_name {
+                                    Some(_) => sexpr!(("syntax-shift-phase-level" #(q) #(Ast::Symbol(self.phase_shift_id.clone())))),
+                                    None => q,
+                                })
                     }
                     _ => Err(format!("unrecognized core form {core_sym}")),
                 }
             }
             Ast::Symbol(ref s1) => {
                 let with = syntax.with_ref(s1.clone());
-                let b = self.resolve(&with, false).inspect_err(|e| {
-                    dbg!(format!("{e}"));
-                })?;
+                let b = Expander::resolve(&with, phase, false)?;
                 match b {
                     Binding::Local(b) => Ok(Ast::Symbol(key_to_symbol(b))),
-                    Binding::Module(s) => ns
-                        .variables
-                        .get(&s.clone().into())
-                        .ok_or(format!("missing core bindig for primitive {s}"))
-                        .cloned(),
+                    Binding::Module(b) => {
+                        let module_name = b.from_module;
+                        match module_name {
+                            ResolvedModulePath::Symbol(ref s) if &*s.0 == "#%core" => {
+                                let module_namespace = ns
+                                    .namespace_to_module_namespace(&module_name, phase, false)
+                                    .map_err(|e| e.unwrap_or(format!("no module found")))?;
+                                module_namespace.namespace_module_instantiate(
+                                    &ResolvedModulePath::Symbol("#%core".into()),
+                                    b.from_phase,
+                                    Phase::Normal(0),
+                                )?;
+                                module_namespace
+                                    .namespace_get_variable(b.from_phase, &b.from_symbol)
+                                    .ok_or(format!(
+                                        "internal error: bad #%core reference: {phase} {} {}",
+                                        b.from_symbol, b.from_phase
+                                    ))
+                            }
+                            _ if Some(module_name) == self_name => Ok(Ast::Symbol(b.from_symbol)),
+                            _ => Ok(sexpr!(
+                                ("namespace-get-variable"
+                                    ("namespace->module-namespace"
+                                        #(self_name.map_or(todo!("runtime namespace repr {ns:?}"),
+                                            |_| Ast::Symbol(self.namespace_id.clone())))
+                                        (quote #(module_name.into()))
+                                        #({
+                                            let phase = phase - b.from_phase;
+                                            self_name.map_or(sexpr!(("+"  #(Ast::Symbol(self.phase_shift_id.clone())) #(todo!("runtime phase repr {phase}")))),
+                                            |_| Ast::Symbol(self.namespace_id.clone()))
+                                        }))
+                                        #(todo!("runtime phase repr {}", b.from_phase))
+                                        (quote #(Ast::Symbol(b.from_symbol)))
+                                        #(todo!("failure handler"))))),
+                        }
+                        //ns.variables
+                        //    .get(&b.clone().into())
+                        //    .ok_or(format!("missing core bindig for primitive {b}"))
+                        //    .cloned()
+                    }
                 }
             }
             _ => Err(format!("bad syntax after expansion {s} compile")),
         }
     }
-    fn loop_formals(&self, formals: Ast) -> Result<Ast, String> {
+    fn compile_module(
+        &self,
+        s: Ast,
+        ns: &NameSpace,
+        self_name: Option<ResolvedModulePath>,
+    ) -> Result<Ast, String> {
+        todo!()
+    }
+    fn loop_formals(&self, formals: Ast, phase: Phase) -> Result<Ast, String> {
         match formals {
             Ast::Syntax(mut s) => {
                 let mut a = Ast::TheEmptyList;
                 mem::swap(&mut s.0, &mut a);
                 match a {
-                    Ast::Symbol(sym) => self.local_symbol(&s.with(sym)).map(Ast::Symbol),
-                    a @ (Ast::Pair(_) | Ast::TheEmptyList) => self.loop_formals(a),
+                    Ast::Symbol(sym) => self.local_symbol(&s.with(sym), phase).map(Ast::Symbol),
+                    a @ (Ast::Pair(_) | Ast::TheEmptyList) => self.loop_formals(a, phase),
                     formals => Err(format!("bad parameter: {formals}")),
                 }
             }
             Ast::Pair(p) => Ok(Ast::Pair(Box::new(Pair(
-                self.loop_formals(p.0)?,
-                self.loop_formals(p.1)?,
+                self.loop_formals(p.0, phase)?,
+                self.loop_formals(p.1, phase)?,
             )))),
             Ast::TheEmptyList => Ok(Ast::TheEmptyList),
             _ => Err(format!("bad parameter: {formals}")),
         }
     }
-    fn compile_lambda(&self, formals: Ast, body: Ast, ns: &NameSpace) -> Result<Ast, String> {
-        Ok(list!(self.loop_formals(formals)?, self.compile(body, ns)?))
+
+    fn compile_lambda(
+        &self,
+        formals: Ast,
+        body: Ast,
+        ns: &NameSpace,
+        phase: Phase,
+        self_name: Option<ResolvedModulePath>,
+    ) -> Result<Ast, String> {
+        Ok(list!(
+            self.loop_formals(formals, phase)?,
+            self.compile(body, ns, phase, self_name)?
+        ))
     }
 
-    fn compile_let(&self, core_sym: Rc<str>, s: Ast, ns: &NameSpace) -> Result<Ast, String> {
-        let rec = &*core_sym == "letrec-values";
+    fn compile_let(
+        &self,
+        core_sym: Symbol,
+        s: Ast,
+        ns: &NameSpace,
+        phase: Phase,
+        self_name: Option<ResolvedModulePath>,
+    ) -> Result<Ast, String> {
+        let rec = &*core_sym.0 == "letrec-values";
         let m = match_syntax(
             s,
             list!(
@@ -184,19 +261,22 @@ impl Expander {
             idss,
             m("rhs".into()).ok_or("internal error")?,
             |ids, rhs| {
-                ids.map(|id| self.local_symbol(&id.try_into()?).map(Ast::Symbol))
-                    .and_then(|ids| self.compile(rhs.clone(), ns).map(|rhs| list!(ids, rhs)))
+                ids.map(|id| self.local_symbol(&id.try_into()?, phase).map(Ast::Symbol))
+                    .and_then(|ids| {
+                        self.compile(rhs.clone(), ns, phase, self_name.clone())
+                            .map(|rhs| list!(ids, rhs))
+                    })
             },
         )
         .and_then(|signature| {
             m("body".into())
                 .ok_or("internal error".to_string())
-                .and_then(|body| self.compile(body, ns))
+                .and_then(|body| self.compile(body, ns, phase, self_name))
                 .map(|body| list!(Ast::Symbol(core_sym.into()), signature, body))
         })
     }
-    fn local_symbol(&self, id: &Syntax<Symbol>) -> Result<Symbol, String> {
-        let b = self.resolve(id, false).inspect_err(|e| {
+    fn local_symbol(&self, id: &Syntax<Symbol>, phase: Phase) -> Result<Symbol, String> {
+        let b = Expander::resolve(id, phase, false).inspect_err(|e| {
             dbg!(format!("{e}"));
         })?;
         let Binding::Local(s) = b else {

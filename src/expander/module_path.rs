@@ -281,6 +281,20 @@ impl From<&str> for ResolvedModulePath {
         Self::Symbol(value.into())
     }
 }
+impl From<ResolvedModulePath> for Ast {
+    fn from(value: ResolvedModulePath) -> Self {
+        match value {
+            ResolvedModulePath::Symbol(symbol) => Self::Symbol(symbol),
+            ResolvedModulePath::List(symbols) => {
+                symbols
+                    .into_iter()
+                    .fold(Ast::TheEmptyList, |list: Ast, current: &Symbol| {
+                        Ast::Pair(Box::new(Pair(Ast::Symbol(current.clone()), list)))
+                    })
+            }
+        }
+    }
+}
 impl ModulePath {
     pub fn resolve_module_path(
         self,

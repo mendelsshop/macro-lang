@@ -235,7 +235,7 @@ impl NameSpace {
     ) {
         self.namespace_to_definitions(phase_level, |d| d.transformers.insert(name, value));
     }
-    fn namespace_get_variable(&self, phase_level: Phase, name: &Symbol) -> Option<Ast> {
+    pub fn namespace_get_variable(&self, phase_level: Phase, name: &Symbol) -> Option<Ast> {
         self.namespace_to_definitions(phase_level, |d| d.variables.get(name).cloned())
     }
     pub fn namespace_get_transformer(
