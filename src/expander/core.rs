@@ -27,15 +27,15 @@ impl Expander {
                 SourceLocation::default(),
                 Properties::new(),
             ),
-            Phase(0),
+            Phase::Normal(0),
             Binding::Module(ModuleBinding {
                 from_module: "#%core".into(),
-                from_phase: Phase(0),
+                from_phase: Phase::Normal(0),
                 from_symbol: sym.clone(),
                 nominal_from_module: "#%core".into(),
-                nominal_from_phase: Phase(0),
+                nominal_from_phase: Phase::Normal(0),
                 nominal_from_symbol: sym,
-                nominal_require_phase: Phase(0),
+                nominal_require_phase: Phase::Normal(0),
             }),
         )
     }
@@ -58,7 +58,7 @@ impl Expander {
                 "#%core".into(),
                 HashMap::new(),
                 HashMap::from([(
-                    Phase(0),
+                    Phase::Normal(0),
                     self.core_primitives
                         .keys()
                         .chain(self.core_forms.keys())
@@ -68,21 +68,21 @@ impl Expander {
                                 sym.clone().into(),
                                 ModuleBinding {
                                     from_module: "#%core".into(),
-                                    from_phase: Phase(0),
+                                    from_phase: Phase::Normal(0),
                                     from_symbol: sym.clone().into(),
                                     nominal_from_module: "#%core".into(),
-                                    nominal_from_phase: Phase(0),
+                                    nominal_from_phase: Phase::Normal(0),
                                     nominal_from_symbol: sym.into(),
-                                    nominal_require_phase: Phase(0),
+                                    nominal_require_phase: Phase::Normal(0),
                                 },
                             )
                         })
                         .collect(),
                 )]),
-                Phase(0),
-                Phase(1),
+                Phase::Normal(0),
+                Phase::Normal(1),
                 Rc::new(move |ns, _phase, phase_level| match phase_level {
-                    Phase(0) => {
+                    Phase::Normal(0) => {
                         primitives
                             .clone()
                             .into_iter()
@@ -91,7 +91,7 @@ impl Expander {
                                 ns.namespace_set_variable(phase_level, sym, value);
                             });
                     }
-                    Phase(1) => {
+                    Phase::Normal(1) => {
                         transformers
                             .clone()
                             .into_iter()

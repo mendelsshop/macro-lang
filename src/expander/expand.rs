@@ -473,7 +473,7 @@ impl Expander {
             self.eval_for_bindings(
                 exp_rhs.clone(),
                 id_count,
-                ctx.phase + Phase(1),
+                ctx.phase + Phase::Normal(1),
                 ctx.namespace,
             )?,
             exp_rhs,
@@ -519,7 +519,7 @@ impl Expander {
             ExpandContext {
                 scopes: BTreeSet::new(),
                 module_scopes: BTreeSet::new(),
-                phase: ctx.phase + Phase(1),
+                phase: ctx.phase + Phase::Normal(1),
                 env: CompileTimeEnvoirnment::new(),
                 only_immediate: false,
                 post_expansion_scope: None,

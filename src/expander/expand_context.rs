@@ -51,7 +51,7 @@ impl ExpandContext {
             post_expansion_scope: None,
             scopes: BTreeSet::new(),
             context: Context::TopLevel,
-            phase: Phase(0),
+            phase: Phase::Normal(0),
             module_begin_k: None,
         }
     }

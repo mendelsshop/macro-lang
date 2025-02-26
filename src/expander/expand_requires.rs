@@ -114,12 +114,14 @@ fn parse_and_perform_requires(
             match fm {
                 Some(fm) if fm.0 == "for-meta".into() => {
                     check_nested(Layer::RawNoJustMeta)?;
-                    let m = match_syntax((&req).clone(), sexpr!(("for-meta" "phase-level" spec "...")))?;
-                    let phase = matches_to!(m("phase-level".into()).ok_or("internal error")? => Ast::Syntax)
-                        .and_then(|s|
-                        //TODO: label phase (just #f)
-                        matches_to!(s.0 => Ast::Number).and_then(|n| (n.round() == n).then_some(Phase(n as isize))))
-                        .ok_or(format!("bad phase: {req}"))?;
+                    let m = match_syntax(
+                        (&req).clone(),
+                        sexpr!(("for-meta" "phase-level" spec "...")),
+                    )?;
+                    let phase = parse_phase_from_syntax(
+                        m("phase-level".into()).ok_or("internal error")?,
+                        &req,
+                    )?;
                     let spec = m("spec".into()).ok_or("internal error")?;
                     parse_and_perform_requires_loop(
                         spec,
@@ -138,60 +140,191 @@ fn parse_and_perform_requires(
                     check_nested(Layer::RawNoJustMeta)?;
                     let m = match_syntax((&req).clone(), sexpr!(("for-syntax"  spec "...")))?;
                     let spec = m("spec".into()).ok_or("internal error")?;
-                    parse_and_perform_requires_loop(spec, top_req.or(Some(&req)), phase_shift + Phase(1), just_meta, (&adjust).clone(), Layer::Phaseless, (&this).clone(), module_namespace, (&requires_and_provide).clone(), run)
+                    parse_and_perform_requires_loop(
+                        spec,
+                        top_req.or(Some(&req)),
+                        phase_shift + Phase::Normal(1),
+                        just_meta,
+                        (&adjust).clone(),
+                        Layer::Phaseless,
+                        (&this).clone(),
+                        module_namespace,
+                        (&requires_and_provide).clone(),
+                        run,
+                    )
                 }
                 Some(fm) if fm.0 == "for-template".into() => {
                     check_nested(Layer::RawNoJustMeta)?;
                     let m = match_syntax(req.clone(), sexpr!(("for-template"  spec "...")))?;
                     let spec = m("spec".into()).ok_or("internal error")?;
-                    parse_and_perform_requires_loop(spec, top_req.or(Some(&req)), phase_shift - Phase(1), just_meta, adjust.clone(), Layer::Phaseless, this.clone(), module_namespace, requires_and_provide.clone(), run)
+                    parse_and_perform_requires_loop(
+                        spec,
+                        top_req.or(Some(&req)),
+                        phase_shift - Phase::Normal(1),
+                        just_meta,
+                        adjust.clone(),
+                        Layer::Phaseless,
+                        this.clone(),
+                        module_namespace,
+                        requires_and_provide.clone(),
+                        run,
+                    )
                 }
                 Some(fm) if fm.0 == "for-label".into() => {
                     check_nested(Layer::RawNoJustMeta)?;
                     let m = match_syntax(req.clone(), sexpr!(("for-label"  spec "...")))?;
                     let spec = m("spec".into()).ok_or("internal error")?;
-                    parse_and_perform_requires_loop(spec, top_req.or(Some(&req)), todo!("label phase"), just_meta, adjust.clone(), Layer::Phaseless, this.clone(), module_namespace, requires_and_provide.clone(), run)
+                    parse_and_perform_requires_loop(
+                        spec,
+                        top_req.or(Some(&req)),
+                        Phase::Label,
+                        just_meta,
+                        adjust.clone(),
+                        Layer::Phaseless,
+                        this.clone(),
+                        module_namespace,
+                        requires_and_provide.clone(),
+                        run,
+                    )
                 }
                 Some(fm) if fm.0 == "just-meta".into() => {
                     check_nested(Layer::Raw)?;
-                    let m = match_syntax(req.clone(), sexpr!(("just-meta" "phase-level" spec "...")))?;
+                    let m =
+                        match_syntax(req.clone(), sexpr!(("just-meta" "phase-level" spec "...")))?;
 
-                    let phase = matches_to!(m("phase-level".into()).ok_or("internal error")? => Ast::Syntax).and_then(|s|
-                        //TODO: label phase (just #f)
-                        matches_to!(s.0 => Ast::Number).and_then(|n| (n.round() == n).then_some(Phase(n as isize)))
-                    ).ok_or(format!("bad phase: {req}"))?;
+                    let phase = parse_phase_from_syntax(
+                        m("phase-level".into()).ok_or("internal error")?,
+                        &req,
+                    )?;
                     let spec = m("spec".into()).ok_or("internal error")?;
-                    parse_and_perform_requires_loop(spec, top_req.or(Some(&req)), phase_shift + phase, just_meta, adjust.clone(), Layer::RawNoJustMeta, this.clone(), module_namespace, requires_and_provide.clone(), run)
+                    parse_and_perform_requires_loop(
+                        spec,
+                        top_req.or(Some(&req)),
+                        phase_shift + phase,
+                        just_meta,
+                        adjust.clone(),
+                        Layer::RawNoJustMeta,
+                        this.clone(),
+                        module_namespace,
+                        requires_and_provide.clone(),
+                        run,
+                    )
                 }
                 Some(fm) if fm.0 == "only".into() => {
                     check_nested(Layer::Phaseless)?;
                     let m = match_syntax(req.clone(), sexpr!((only  spec id "...")))?;
                     let spec = sexpr!((#(m("spec".into()).ok_or("internal error")?)));
-                    parse_and_perform_requires_loop(spec, top_req.or(Some(&req)), phase_shift, just_meta, Some(Adjust::Only { symbols: identifiers_to_symbol_set(m("id".into()).ok_or("internal error")? )?}), Layer::Path, this.clone(), module_namespace, requires_and_provide.clone(), run)
+                    parse_and_perform_requires_loop(
+                        spec,
+                        top_req.or(Some(&req)),
+                        phase_shift,
+                        just_meta,
+                        Some(Adjust::Only {
+                            symbols: identifiers_to_symbol_set(
+                                m("id".into()).ok_or("internal error")?,
+                            )?,
+                        }),
+                        Layer::Path,
+                        this.clone(),
+                        module_namespace,
+                        requires_and_provide.clone(),
+                        run,
+                    )
                 }
                 Some(fm) if fm.0 == "prefix".into() => {
                     check_nested(Layer::Phaseless)?;
                     let m = match_syntax(req.clone(), sexpr!((prefix "id:prefix" spec )))?;
                     let spec = sexpr!((#(m("spec".into()).ok_or("internal error")?)));
-                    parse_and_perform_requires_loop(spec, top_req.or(Some(&req)), phase_shift, just_meta, Some(Adjust::Prefix { symbol: identifier_symbol(m("id:prefix".into()).ok_or("internal error")?)? } ), Layer::Path, this.clone(), module_namespace, requires_and_provide.clone(), run)
+                    parse_and_perform_requires_loop(
+                        spec,
+                        top_req.or(Some(&req)),
+                        phase_shift,
+                        just_meta,
+                        Some(Adjust::Prefix {
+                            symbol: identifier_symbol(
+                                m("id:prefix".into()).ok_or("internal error")?,
+                            )?,
+                        }),
+                        Layer::Path,
+                        this.clone(),
+                        module_namespace,
+                        requires_and_provide.clone(),
+                        run,
+                    )
                 }
                 Some(fm) if fm.0 == "all-except".into() => {
                     check_nested(Layer::Phaseless)?;
                     let m = match_syntax(req.clone(), sexpr!(("all-except"  spec id "..." )))?;
                     let spec = sexpr!((#(m("spec".into()).ok_or("internal error")?)));
-                    parse_and_perform_requires_loop(spec, top_req.or(Some(&req)), phase_shift, just_meta, Some(Adjust::AllExcept { prefix_symbol: "||".into(), symbols: identifiers_to_symbol_set(m("id".into()).ok_or("internal error")? )? }  ), Layer::Path, this.clone(), module_namespace, requires_and_provide.clone(), run)
+                    parse_and_perform_requires_loop(
+                        spec,
+                        top_req.or(Some(&req)),
+                        phase_shift,
+                        just_meta,
+                        Some(Adjust::AllExcept {
+                            prefix_symbol: "||".into(),
+                            symbols: identifiers_to_symbol_set(
+                                m("id".into()).ok_or("internal error")?,
+                            )?,
+                        }),
+                        Layer::Path,
+                        this.clone(),
+                        module_namespace,
+                        requires_and_provide.clone(),
+                        run,
+                    )
                 }
                 Some(fm) if fm.0 == "prefix-all-except".into() => {
                     check_nested(Layer::Phaseless)?;
-                    let m = match_syntax(req.clone(), sexpr!(("all-except" "id:prefix" spec id "..." )))?;
+                    let m = match_syntax(
+                        req.clone(),
+                        sexpr!(("all-except" "id:prefix" spec id "..." )),
+                    )?;
                     let spec = sexpr!((#(m("spec".into()).ok_or("internal error")?)));
-                    parse_and_perform_requires_loop(spec, top_req.or(Some(&req)), phase_shift, just_meta, Some(Adjust::AllExcept { prefix_symbol: identifier_symbol(m("id:prefix".into()).ok_or("internal error")?)?, symbols: identifiers_to_symbol_set(m("id".into()).ok_or("internal error")? )? }  ), Layer::Path, this.clone(), module_namespace, requires_and_provide.clone(), run)
+                    parse_and_perform_requires_loop(
+                        spec,
+                        top_req.or(Some(&req)),
+                        phase_shift,
+                        just_meta,
+                        Some(Adjust::AllExcept {
+                            prefix_symbol: identifier_symbol(
+                                m("id:prefix".into()).ok_or("internal error")?,
+                            )?,
+                            symbols: identifiers_to_symbol_set(
+                                m("id".into()).ok_or("internal error")?,
+                            )?,
+                        }),
+                        Layer::Path,
+                        this.clone(),
+                        module_namespace,
+                        requires_and_provide.clone(),
+                        run,
+                    )
                 }
                 Some(fm) if fm.0 == "rename".into() => {
                     check_nested(Layer::Phaseless)?;
-                    let m = match_syntax(req.clone(), sexpr!(("all-except" spec "id:to"  "id:from"  )))?;
+                    let m = match_syntax(
+                        req.clone(),
+                        sexpr!(("all-except" spec "id:to"  "id:from"  )),
+                    )?;
                     let spec = sexpr!((#(m("spec".into()).ok_or("internal error")?)));
-                    parse_and_perform_requires_loop(spec, top_req.or(Some(&req)), phase_shift, just_meta, Some(Adjust::Rename {from_symbol : identifier_symbol( m("id:from".into()).ok_or("internal error")?)?, to_id: m("id".into()).ok_or("internal error")?.try_into()? }   ), Layer::Path, this.clone(), module_namespace, requires_and_provide.clone(), run)
+                    parse_and_perform_requires_loop(
+                        spec,
+                        top_req.or(Some(&req)),
+                        phase_shift,
+                        just_meta,
+                        Some(Adjust::Rename {
+                            from_symbol: identifier_symbol(
+                                m("id:from".into()).ok_or("internal error")?,
+                            )?,
+                            to_id: m("id".into()).ok_or("internal error")?.try_into()?,
+                        }),
+                        Layer::Path,
+                        this.clone(),
+                        module_namespace,
+                        requires_and_provide.clone(),
+                        run,
+                    )
                 }
                 _ => {
                     let module_path = req
@@ -230,6 +363,18 @@ fn parse_and_perform_requires(
     )
 }
 
+fn parse_phase_from_syntax(phase: Ast, req: &Ast) -> Result<Phase, String> {
+    matches_to!(phase => Ast::Syntax)
+        .and_then(|s| match s.0 {
+            Ast::Number(e) => {
+                Some(e).and_then(|n| (n.round() == n).then_some(Phase::Normal(n as isize)))
+            }
+            Ast::Boolean(false) => Some(Phase::Label),
+            _ => None,
+        })
+        .ok_or(format!("bad phase: {req}"))
+}
+
 fn identifier_symbol(s: Ast) -> Result<Symbol, String> {
     Ok(TryInto::<Syntax<Symbol>>::try_into(s)?.0)
 }
@@ -257,7 +402,7 @@ fn perform_initial_require(
         this,
         in_syntax,
         module_namespace,
-        Phase(0),
+        Phase::Normal(0),
         JustMeta::All,
         None,
         requires_and_provide,
@@ -294,7 +439,6 @@ fn perform_require(
 
     let mut done_symbols: HashSet<Symbol> = HashSet::new();
     requires_and_provide.add_required_module(module_name.clone(), phase_shift);
-    // TODO: unify resolved module path and resovled module name
     bind_all_provides(
         bind_in_syntax,
         phase_shift,
@@ -364,7 +508,11 @@ fn perform_require(
 
     module_namespace.namespace_module_visit(&module_name, phase_shift)?;
     if run {
-        module_namespace.namespace_module_instantiate(&module_name, phase_shift, Phase(0))?;
+        module_namespace.namespace_module_instantiate(
+            &module_name,
+            phase_shift,
+            Phase::Normal(0),
+        )?;
     }
     if let Some(needs_symbols) = adjust
         .and_then(|adjust| match adjust {

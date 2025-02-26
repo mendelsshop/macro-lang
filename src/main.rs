@@ -38,7 +38,7 @@ impl UniqueNumberManager {
     }
     pub fn new_multi_scope() -> Scope {
         Scope::ShiftedMultiScope(ShiftedMultiScope(
-            phase::Phase(0),
+            phase::Phase::Normal(0),
             MultiScope(MutableMap::default()),
         ))
     }

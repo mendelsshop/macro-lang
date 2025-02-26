@@ -83,7 +83,7 @@ impl Default for NameSpace {
     fn default() -> Self {
         Self {
             scope: Scope::ShiftedMultiScope(ShiftedMultiScope(
-                Phase(0),
+                Phase::Normal(0),
                 MultiScope(MutableMap::default()),
             )),
             phases: MutableMap::default(),
@@ -106,7 +106,7 @@ impl NameSpace {
             ..Default::default()
         };
         self.module_instances
-            .insert((name, Phase(0)), module_namespace.clone());
+            .insert((name, Phase::Normal(0)), module_namespace.clone());
         module_namespace
     }
     pub fn namespace_to_module(&self, name: &ResolvedModuleName) -> Option<Ref<'_, Module>> {
@@ -126,7 +126,7 @@ impl NameSpace {
         .insert(name, m);
     }
 
-    /// min_phase: defualts to Phase(0)
+    /// min_phase: defualts to Phase::Normal(0)
     pub fn namespace_module_instantiate(
         &self,
         name: &ResolvedModuleName,
@@ -154,23 +154,27 @@ impl NameSpace {
                     )
                 })
             })?;
-        (module.min_phase_level.0..module.max_phase_level.0 + 1)
-            .map(Phase)
-            .for_each(|phase_level| {
-                let phase = phase_level + phase_shift;
-                if phase >= min_phase {
-                    module_namespace.namespace_to_definitions(phase_level, |definitions| {
-                        if !definitions.instantiated {
-                            definitions.instantiated = true;
-                            (module.instantiate)(
-                                module_namespace.clone(),
-                                phase_shift,
-                                phase_level,
-                            );
-                        }
-                    });
-                }
-            });
+        if let (Phase::Normal(min_level), Phase::Normal(max_level)) =
+            (module.min_phase_level, module.max_phase_level)
+        {
+            (min_level..(max_level + 1))
+                .map(Phase::Normal)
+                .for_each(|phase_level| {
+                    let phase = phase_level + phase_shift;
+                    if phase >= min_phase {
+                        module_namespace.namespace_to_definitions(phase_level, |definitions| {
+                            if !definitions.instantiated {
+                                definitions.instantiated = true;
+                                (module.instantiate)(
+                                    module_namespace.clone(),
+                                    phase_shift,
+                                    phase_level,
+                                );
+                            }
+                        });
+                    }
+                });
+        }
         Ok(())
     }
 
@@ -179,7 +183,7 @@ impl NameSpace {
         name: &ResolvedModuleName,
         phase: Phase,
     ) -> Result<(), String> {
-        self.namespace_module_instantiate(name, phase, Phase(1))
+        self.namespace_module_instantiate(name, phase, Phase::Normal(1))
     }
     /// create: defaults to false
     pub fn namespace_to_module_namespace(
