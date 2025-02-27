@@ -1,4 +1,4 @@
-use std::{mem, rc::Rc};
+use std::mem;
 
 use crate::{
     ast::{syntax::Syntax, Ast, Pair, Symbol},
@@ -7,12 +7,8 @@ use crate::{
 };
 
 use super::{
-    binding::Binding,
-    module_path::ResolvedModulePath,
-    namespace::NameSpace,
-    phase::{self, Phase},
-    r#match::match_syntax,
-    Expander,
+    binding::Binding, module_path::ResolvedModulePath, namespace::NameSpace, phase::Phase,
+    r#match::match_syntax, Expander,
 };
 
 impl Expander {

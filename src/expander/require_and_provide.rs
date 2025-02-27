@@ -88,7 +88,7 @@ impl RequiresAndProvides {
         self.provides.clear();
     }
 
-    fn add_provide(
+    pub fn add_provide(
         &self,
         sym: Symbol,
         phase: Phase,
