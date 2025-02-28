@@ -74,7 +74,7 @@ impl RequiresAndProvides {
         Ok(())
     }
 
-    fn extract_module_requires(
+    pub fn extract_module_requires(
         &self,
         mod_path: &ModuleName,
         phase: Phase,
@@ -122,7 +122,7 @@ impl RequiresAndProvides {
 }
 #[derive(Clone, Debug)]
 pub struct Required {
-    id: Syntax<Symbol>,
-    phase: Phase,
-    can_shadow: bool,
+    pub id: Syntax<Symbol>,
+    pub phase: Phase,
+    pub can_shadow: bool,
 }

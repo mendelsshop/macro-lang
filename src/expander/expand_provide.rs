@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use crate::{
     ast::{syntax::Syntax, Ast, Symbol},
     expander::module_path::ModulePath,
@@ -94,7 +96,7 @@ fn parse_all_from(
         .ok_or(format!(""))?;
     parse_all_from_module(
         module_name,
-        None,
+        &None,
         except_ids,
         None,
         at_phase,
@@ -103,11 +105,64 @@ fn parse_all_from(
 }
 fn parse_all_from_module(
     mod_name: ResolvedModulePath,
-    matching_syntax: Option<Ast>,
+    matching_syntax: &Option<Ast>,
     except_ids: Vec<Syntax<Symbol>>,
     prefix_symbol: Option<Symbol>,
     at_phase: Phase,
     require_and_provide: &RequiresAndProvides,
 ) -> Result<(), String> {
-    todo!()
+    let requireds = require_and_provide
+        .extract_module_requires(&mod_name, at_phase)
+        .ok_or(format!(
+            "no requires from module path: {mod_name} at phase: {at_phase}"
+        ))?
+        .clone();
+    //.into_iter();
+    let add_prefix = |sym: Symbol| {
+        prefix_symbol
+            .clone()
+            .map_or::<Symbol, _>(sym.clone(), |prefix_symbol| {
+                Symbol(format!("{prefix_symbol}{}", sym.0).into(), sym.1)
+            })
+    };
+    let mut found = HashSet::new();
+    for i in &requireds {
+        let id = &i.id;
+        let phase = i.phase;
+        if !(matching_syntax.as_ref().is_some_and(|matching_syntax| {
+            !id.free_identifier(
+                &id.0.clone().datum_to_syntax(
+                    matching_syntax.scope_set(),
+                    matching_syntax.shifted_multi_scope_set(),
+                    None,
+                    None,
+                ),
+                phase,
+            ) | (except_ids.iter().any(|except_id| {
+                id.free_identifier(except_id, phase) && (found.insert(except_id) || true)
+            }))
+        })) {
+            require_and_provide.add_provide(
+                add_prefix(id.0.clone()),
+                phase,
+                Expander::resolve(&id, phase, false)?,
+                id,
+            );
+        }
+    }
+    if found.len() != except_ids.len() {
+        for except_id in &except_ids {
+            if !(found.contains(except_id)
+                || requireds
+                    .iter()
+                    .any(|i| i.id.free_identifier(except_id, i.phase)))
+            {
+                return Err(matching_syntax.as_ref().map_or_else(
+                    || format!("exluded identifier was not required in the module {except_id}"),
+                    |_| format!("exluded identifier was not defined in the module {except_id}"),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
