@@ -75,11 +75,40 @@ fn parse_identifier(
 
 fn parse_struct(
     id_struct: Syntax<Symbol>,
+    // this can technically, be a references and array
     fields: Vec<Syntax<Symbol>>,
     at_phase: Phase,
     require_and_provide: &RequiresAndProvides,
 ) -> Result<(), String> {
-    todo!()
+    macro_rules! fmt {
+        ($fmt:literal) => {{
+            let sym: Symbol = format!($fmt, id_struct.0).as_str().into();
+            sym.datum_to_syntax(
+                Some(id_struct.1.clone()),
+                Some(id_struct.2.clone()),
+                Some(id_struct.3.clone()),
+                None,
+            )
+        }};
+        ($fmt:literal, $e:expr) => {{
+            let sym: Symbol = format!($fmt, id_struct.0, $e).as_str().into();
+            sym.datum_to_syntax(
+                Some(id_struct.1.clone()),
+                Some(id_struct.2.clone()),
+                Some(id_struct.3.clone()),
+                None,
+            )
+        }};
+    }
+    [fmt!("{}"), fmt!("make-{}"), fmt!("struct:{}"), fmt!("{}?")]
+        .into_iter()
+        .try_for_each(|id| parse_identifier(&id.clone(), id.0, at_phase, require_and_provide))?;
+    fields.into_iter().try_for_each(|field| {
+        let get_id = fmt!("{}-{}", field);
+        let set_id = fmt!("set-{}-{}!", field);
+        parse_identifier(&get_id.clone(), get_id.0, at_phase, require_and_provide)?;
+        parse_identifier(&set_id.clone(), set_id.0, at_phase, require_and_provide)
+    })
 }
 
 fn parse_all_from(
