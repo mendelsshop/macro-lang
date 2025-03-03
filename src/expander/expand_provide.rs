@@ -1,8 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::{
     ast::{syntax::Syntax, Ast, Symbol},
     expander::module_path::ModulePath,
+    matches_to,
 };
 
 use super::{
@@ -10,7 +11,7 @@ use super::{
     require_and_provide::RequiresAndProvides, Expander,
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 enum Layer {
     Raw,
     Phaseless,
@@ -33,7 +34,7 @@ pub fn parse_and_expand_provides(
     context: ExpandContext,
     expand: fn(&mut Expander, s: Ast, ctx: ExpandContext) -> Result<Ast, String>,
     rebuild: fn(Ast, Ast) -> Ast,
-) -> Result<(), String> {
+) -> Result<Vec<Ast>, String> {
     fn parse_and_expand_provides_loop(
         specs: Ast,
         at_phase: Phase,
@@ -45,8 +46,50 @@ pub fn parse_and_expand_provides(
         context: ExpandContext,
         expand: fn(&mut Expander, s: Ast, ctx: ExpandContext) -> Result<Ast, String>,
         rebuild: fn(Ast, Ast) -> Ast,
-    ) -> Result<(), String> {
-        todo!()
+    ) -> Result<Vec<Ast>, String> {
+        specs.foldl(
+            |spec, current| {
+                let mut current = current?;
+                let check_nested = |want_layer| {
+                    is_nested(layer, want_layer)
+                        .then_some(())
+                        .ok_or(format!("invalid nesting: {spec}"))
+                };
+                let fm: Option<Syntax<Symbol>> = matches_to!(&spec => Ast::Syntax)
+                    .and_then(|s| matches_to!(&s.0 => Ast::Pair))
+                    .and_then(|p| p.0.clone().try_into().ok());
+
+                match fm {
+                    Some(fm) if fm.0 == "for-meta".into() => todo!(),
+                    Some(fm) if fm.0 == "for-syntax".into() => todo!(),
+                    Some(fm) if fm.0 == "for-label".into() => todo!(),
+                    Some(fm) if fm.0 == "protect".into() => todo!(),
+                    Some(fm) if fm.0 == "rename".into() => todo!(),
+                    Some(fm) if fm.0 == "struct".into() => todo!(),
+                    Some(fm) if fm.0 == "all-from".into() => todo!(),
+                    Some(fm) if fm.0 == "all-from-except".into() => todo!(),
+                    Some(fm) if fm.0 == "all-defined".into() => todo!(),
+                    Some(fm) if fm.0 == "all-defined-except".into() => todo!(),
+                    Some(fm) if fm.0 == "prefix-all-defined".into() => todo!(),
+                    Some(fm) if fm.0 == "prefix-all-defined-except".into() => todo!(),
+                    Some(fm) if fm.0 == "expand".into() => todo!(),
+                    _ => match spec.clone().try_into() {
+                        Ok(spec_ident) => {
+                            parse_identifier(
+                                &spec_ident,
+                                spec_ident.0.clone(),
+                                at_phase,
+                                require_and_provide,
+                            );
+                            current.push(spec);
+                            Ok(current)
+                        }
+                        Err(_) => Err(format!("bad provide spec: {spec}")),
+                    },
+                }
+            },
+            Ok(vec![]),
+        )?
     }
     parse_and_expand_provides_loop(
         specs,
