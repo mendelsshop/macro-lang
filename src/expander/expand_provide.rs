@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::{
     ast::{syntax::Syntax, Ast, Symbol},
-    expander::{module_path::ModulePath, r#match::match_syntax},
+    expander::{expand::rebuild, module_path::ModulePath, r#match::match_syntax},
     list, matches_to, sexpr,
 };
 
@@ -26,17 +26,28 @@ fn is_nested(layer: Layer, want_layer: Layer) -> bool {
         .is_some_and(|pos| LAYERS.split_at(pos).1.contains(&want_layer))
 }
 
-pub fn parse_and_expand_provides(
-    specs: Ast,
-    require_and_provide: &RequiresAndProvides,
-    self_name: Option<ResolvedModulePath>,
-    phase: Phase,
-    context: ExpandContext,
-    expand: fn(&mut Expander, s: Ast, ctx: ExpandContext) -> Result<Ast, String>,
-    rebuild: fn(Ast, Ast) -> Ast,
-) -> Result<Ast, String> {
+impl Expander {
+    pub fn parse_and_expand_provides(
+        &mut self,
+        specs: Ast,
+        require_and_provide: &RequiresAndProvides,
+        self_name: Option<ResolvedModulePath>,
+        phase: Phase,
+        context: ExpandContext,
+    ) -> Result<Ast, String> {
+        self.parse_and_expand_provides_loop(
+            specs,
+            phase,
+            false,
+            Layer::Raw,
+            require_and_provide,
+            self_name,
+            phase,
+            context,
+        )
+    }
     fn parse_and_expand_provides_loop(
-        //k: impl FnOnce(Ast) -> Ast,
+        &mut self,
         specs: Ast,
         at_phase: Phase,
         protected: bool,
@@ -45,8 +56,6 @@ pub fn parse_and_expand_provides(
         self_name: Option<ResolvedModulePath>,
         phase: Phase,
         context: ExpandContext,
-        expand: fn(&mut Expander, s: Ast, ctx: ExpandContext) -> Result<Ast, String>,
-        rebuild: fn(Ast, Ast) -> Ast,
     ) -> Result<Ast, String> {
         // TODO: optimize the appends using cps/boxed fns (basically append in reverse)
         // or maybe convert to vec which has better end insertion speed and see if the linked list
@@ -77,22 +86,165 @@ pub fn parse_and_expand_provides(
                             spec,
                             sexpr!((#(m("for-meta".into()).ok_or("internal error")?)
                                     #(m("phase-level".into()).ok_or("internal error")?)
-                                    . #( parse_and_expand_provides_loop(m("spec".into()).ok_or("internal error")?, p + at_phase, protected, layer, require_and_provide, self_name.clone(), phase, context.clone(), expand, rebuild)?))),
+                                    . #(self.parse_and_expand_provides_loop(m("spec".into()).ok_or("internal error")?, 
+                                        p + at_phase,
+                                        protected,
+                                        layer,
+                                        require_and_provide,
+                                        self_name.clone(),
+                                        phase,
+                                        context.clone())?)))
                         );
                         Ok(current.append(list!(new_spec)))
                     }
-                    Some(fm) if fm.0 == "for-syntax".into() => todo!(),
-                    Some(fm) if fm.0 == "for-label".into() => todo!(),
-                    Some(fm) if fm.0 == "protect".into() => todo!(),
-                    Some(fm) if fm.0 == "rename".into() => todo!(),
-                    Some(fm) if fm.0 == "struct".into() => todo!(),
-                    Some(fm) if fm.0 == "all-from".into() => todo!(),
-                    Some(fm) if fm.0 == "all-from-except".into() => todo!(),
-                    Some(fm) if fm.0 == "all-defined".into() => todo!(),
-                    Some(fm) if fm.0 == "all-defined-except".into() => todo!(),
-                    Some(fm) if fm.0 == "prefix-all-defined".into() => todo!(),
-                    Some(fm) if fm.0 == "prefix-all-defined-except".into() => todo!(),
-                    Some(fm) if fm.0 == "expand".into() => todo!(),
+                    Some(fm) if fm.0 == "for-syntax".into() => {
+                        check_nested(Layer::Raw)?;
+                        let m = match_syntax(
+                            spec.clone(),
+                            sexpr!(("for-syntax" spec "...")),
+                        )?;
+
+                        let new_spec = rebuild(
+                            spec,
+                            sexpr!((#(m("for-syntax".into()).ok_or("internal error")?)
+                                    . #(self.parse_and_expand_provides_loop(m("spec".into()).ok_or("internal error")?,
+                                        Phase::Normal(1) + at_phase,
+                                        protected,
+                                        layer,
+                                        require_and_provide,
+                                        self_name.clone(),
+                                        phase,
+                                        context.clone())?)))
+                        );
+                        Ok(current.append(list!(new_spec)))
+                    }
+                    Some(fm) if fm.0 == "for-label".into() => {
+                        check_nested(Layer::Raw)?;
+                        let m = match_syntax(
+                            spec.clone(),
+                            sexpr!(("for-label" spec "...")),
+                        )?;
+
+                        let new_spec = rebuild(
+                            spec,
+                            sexpr!((#(m("for-label".into()).ok_or("internal error")?)
+                                    . #(self.parse_and_expand_provides_loop(m("spec".into()).ok_or("internal error")?,
+                                        Phase::Label,
+                                        protected,
+                                        layer,
+                                        require_and_provide,
+                                        self_name.clone(),
+                                        phase,
+                                        context.clone())?)))
+                        );
+                        Ok(current.append(list!(new_spec)))
+                    }
+                    Some(fm) if fm.0 == "protect".into() => {
+                        check_nested(Layer::Phaseless)?;
+                        if protected {
+                            return Err(format!("invalid nesting {spec}"));
+                        }
+                        let m = match_syntax(
+                            spec.clone(),
+                            sexpr!(("protect" spec "...")),
+                        )?;
+
+                        let new_spec = rebuild(
+                            spec,
+                            sexpr!((#(m("protect".into()).ok_or("internal error")?)
+                                    . #(self.parse_and_expand_provides_loop(m("spec".into()).ok_or("internal error")?,
+                                        at_phase,
+                                        true,
+                                        layer,
+                                        require_and_provide,
+                                        self_name.clone(),
+                                        phase,
+                                        context.clone())?)))
+                        );
+                        Ok(current.append(list!(new_spec)))
+                    }
+                    Some(fm) if fm.0 == "rename".into() => {
+                        check_nested(Layer::Phaseless)?;
+                        let m = match_syntax(spec.clone(), sexpr!((rename "id:from" "id:to")))?;
+                        let symbol: Syntax<Symbol> = m("id:from".into()).ok_or("internal error")?.try_into()?;
+                        parse_identifier(&m("id:from".into()).ok_or("internal error")?.try_into()?, symbol.0, at_phase, require_and_provide);
+                        Ok(current.append(list!(spec)))
+                    }
+                    Some(fm) if fm.0 == "struct".into() => {
+                        check_nested(Layer::Phaseless)?;
+                        let m = match_syntax(spec.clone(), sexpr!((rename "id:struct" ("id:field" "..."))))?;
+                        parse_struct(
+                            m("id:struct".into()).ok_or("internal error")?.try_into()?,
+                            to_id_list(m("id:field".into()).ok_or("internal error")?)?, 
+                            at_phase,
+                            require_and_provide);
+                        Ok(current.append(list!(spec)))
+                    }
+                    Some(fm) if fm.0 == "all-from".into() => {
+                        check_nested(Layer::Phaseless)?;
+                        let m = match_syntax(spec.clone(), sexpr!(("all-from" "mod-path")))?;
+                        parse_all_from(m("mod-path".into()).ok_or("internal error")?, self_name.clone(), vec![], at_phase, require_and_provide)?;
+                        Ok(current.append(list!(spec)))
+                    }
+                    Some(fm) if fm.0 == "all-from-except".into() => {
+                        check_nested(Layer::Phaseless)?;
+                        let m = match_syntax(spec.clone(), sexpr!(("all-from" "mod-path" id)))?;
+                        parse_all_from(m("mod-path".into()).ok_or("internal error")?, self_name.clone(), to_id_list(m("id".into()).ok_or("internal error")?)?, at_phase, require_and_provide)?;
+                        Ok(current.append(list!(spec)))
+                    }
+                    Some(fm) if fm.0 == "all-defined".into() => {
+                        check_nested(Layer::Phaseless)?;
+                        let _ = match_syntax(spec.clone(), sexpr!(("all-defined")))?;
+                        parse_all_from_module( self_name.clone().ok_or(format!("no module path providied in (provide (all-defined)) {spec}"))?, &Some(spec.clone()),vec![],None, at_phase, require_and_provide)?;
+                        Ok(current.append(list!(spec)))
+                    }
+                    Some(fm) if fm.0 == "all-defined-except".into() => {
+                        check_nested(Layer::Phaseless)?;
+                        let m = match_syntax(spec.clone(), sexpr!(("all-defined-except" id "...")))?;
+                        parse_all_from_module(self_name.clone().ok_or(format!("no module path providied in (provide (all-defined)) {spec}"))?,
+                            &Some(spec.clone()),
+                            to_id_list(m("id".into()).ok_or("internal error")?)?, 
+                            None, at_phase, require_and_provide)?;
+                        Ok(current.append(list!(spec)))
+                    }
+                    Some(fm) if fm.0 == "prefix-all-defined".into() => {
+                        check_nested(Layer::Phaseless)?;
+                        let m = match_syntax(spec.clone(), sexpr!(("prefix-all-defined" "id:prefix")))?;
+                        let symbol: Syntax<Symbol> = m("id:prefix".into()).ok_or("internal error")?.try_into()?;
+                        parse_all_from_module(self_name.clone().ok_or(format!("no module path providied in (provide (prefix-all-defined)) {spec}"))?,
+                            &Some(spec.clone()),
+                            vec![],
+                            Some(symbol.0),
+                            at_phase,
+                            require_and_provide)?;
+                        Ok(current.append(list!(spec)))
+                    }
+                    Some(fm) if fm.0 == "prefix-all-defined-except".into() => {
+                        check_nested(Layer::Phaseless)?;
+                        let m = match_syntax(spec.clone(), sexpr!(("all-defined-except" "id:prefix" id "...")))?;
+                        let symbol: Syntax<Symbol> = m("id:prefix".into()).ok_or("internal error")?.try_into()?;
+                        parse_all_from_module(self_name.clone().ok_or(format!("no module path providied in (provide (all-defined)) {spec}"))?,
+                            &Some(spec.clone()),
+                            to_id_list(m("id".into()).ok_or("internal error")?)?, 
+                            Some(symbol.0) , at_phase, require_and_provide)?;
+                        Ok(current.append(list!(spec)))
+                    }
+                    Some(fm) if fm.0 == "expand".into() => {
+                        // TODO: we do not have to clone spec as we are just verifiying and not
+                        // using the result of match
+                        match_syntax(spec.clone(), sexpr!((expand (id . datum))))?;
+                        let m = match_syntax(spec.clone(), sexpr!((expand form)))?;
+                        let exp_spec = self.expand(m("spec".into()).ok_or("internal error")?, context.clone())?;
+                        if
+                            !matches!(exp_spec, Ast::Syntax(ref s) if  matches!(&s.0, Ast::Pair(p) if p.0.clone().try_into().is_ok_and(|i: Syntax<Symbol>| &*i.0.0 == "begin") )) {
+                            return Err(format!( "expansion of `provide` spec does not start `begin`: {spec}"));
+                        }
+                        let e_m  =match_syntax(exp_spec, sexpr!((begin spec "...")))?;
+
+                        self.parse_and_expand_provides_loop(e_m("spec".into()).ok_or("internal error")?, at_phase, protected, layer, require_and_provide, self_name.clone(), phase, context.clone())
+
+
+                    }
                     _ => match spec.clone().try_into() {
                         Ok(spec_ident) => {
                             parse_identifier(
@@ -110,18 +262,12 @@ pub fn parse_and_expand_provides(
             Ok(Ast::TheEmptyList),
         )?
     }
-    parse_and_expand_provides_loop(
-        specs,
-        phase,
-        false,
-        Layer::Raw,
-        require_and_provide,
-        self_name,
-        phase,
-        context,
-        expand,
-        rebuild,
-    )
+}
+
+fn to_id_list(fields: Ast) -> Result<Vec<Syntax<Symbol>>, String> {
+    fields
+        .map_to_list_checked(|a| a.try_into())
+        .map_err(|e| e.unwrap_or("not a list".to_string()))
 }
 
 fn parse_phase_from_syntax(phase: Ast, spec: &Ast) -> Result<Phase, String> {

@@ -4,6 +4,9 @@ use itertools::Itertools;
 
 use crate::{ast::Pair, Ast, Symbol};
 
+// TODO: make compile time version that is garunteed that when if matches, indexing the matched
+// fields will not fail, and indexing patterns that are not declared are compile time error
+
 // sum of the folds might be/probably are supposed to be smoosh hash hash1 by putting all the
 //  concantinating the values of all a in hash and hash1 into new hashmap
 // just used internally to "parse" stuff
