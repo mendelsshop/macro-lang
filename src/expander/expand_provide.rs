@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use crate::{
     ast::{syntax::Syntax, Ast, Symbol},
-    expander::module_path::ModulePath,
-    matches_to,
+    expander::{module_path::ModulePath, r#match::match_syntax},
+    list, matches_to, sexpr,
 };
 
 use super::{
@@ -34,8 +34,9 @@ pub fn parse_and_expand_provides(
     context: ExpandContext,
     expand: fn(&mut Expander, s: Ast, ctx: ExpandContext) -> Result<Ast, String>,
     rebuild: fn(Ast, Ast) -> Ast,
-) -> Result<Vec<Ast>, String> {
+) -> Result<Ast, String> {
     fn parse_and_expand_provides_loop(
+        //k: impl FnOnce(Ast) -> Ast,
         specs: Ast,
         at_phase: Phase,
         protected: bool,
@@ -46,10 +47,13 @@ pub fn parse_and_expand_provides(
         context: ExpandContext,
         expand: fn(&mut Expander, s: Ast, ctx: ExpandContext) -> Result<Ast, String>,
         rebuild: fn(Ast, Ast) -> Ast,
-    ) -> Result<Vec<Ast>, String> {
+    ) -> Result<Ast, String> {
+        // TODO: optimize the appends using cps/boxed fns (basically append in reverse)
+        // or maybe convert to vec which has better end insertion speed and see if the linked list
+        // to vector is not that bad
         specs.foldl(
             |spec, current| {
-                let mut current = current?;
+                let  current = current?;
                 let check_nested = |want_layer| {
                     is_nested(layer, want_layer)
                         .then_some(())
@@ -60,7 +64,23 @@ pub fn parse_and_expand_provides(
                     .and_then(|p| p.0.clone().try_into().ok());
 
                 match fm {
-                    Some(fm) if fm.0 == "for-meta".into() => todo!(),
+                    Some(fm) if fm.0 == "for-meta".into() => {
+                        check_nested(Layer::Raw)?;
+                        let m = match_syntax(
+                            spec.clone(),
+                            sexpr!(("for-meta" "phase-level" spec "...")),
+                        )?;
+                        let p = m("phase-level".into()).ok_or("internal error")?;
+                        let p = parse_phase_from_syntax(p, &spec)?;
+
+                        let new_spec = rebuild(
+                            spec,
+                            sexpr!((#(m("for-meta".into()).ok_or("internal error")?)
+                                    #(m("phase-level".into()).ok_or("internal error")?)
+                                    . #( parse_and_expand_provides_loop(m("spec".into()).ok_or("internal error")?, p + at_phase, protected, layer, require_and_provide, self_name.clone(), phase, context.clone(), expand, rebuild)?))),
+                        );
+                        Ok(current.append(list!(new_spec)))
+                    }
                     Some(fm) if fm.0 == "for-syntax".into() => todo!(),
                     Some(fm) if fm.0 == "for-label".into() => todo!(),
                     Some(fm) if fm.0 == "protect".into() => todo!(),
@@ -81,14 +101,13 @@ pub fn parse_and_expand_provides(
                                 at_phase,
                                 require_and_provide,
                             );
-                            current.push(spec);
-                            Ok(current)
+                        Ok(current.append(list!(spec)))
                         }
                         Err(_) => Err(format!("bad provide spec: {spec}")),
                     },
                 }
             },
-            Ok(vec![]),
+            Ok(Ast::TheEmptyList),
         )?
     }
     parse_and_expand_provides_loop(
@@ -105,6 +124,17 @@ pub fn parse_and_expand_provides(
     )
 }
 
+fn parse_phase_from_syntax(phase: Ast, spec: &Ast) -> Result<Phase, String> {
+    matches_to!(phase => Ast::Syntax)
+        .and_then(|s| match s.0 {
+            Ast::Number(e) => {
+                Some(e).and_then(|n| (n.round() == n).then_some(Phase::Normal(n as isize)))
+            }
+            Ast::Boolean(false) => Some(Phase::Label),
+            _ => None,
+        })
+        .ok_or(format!("bad phase: {spec}"))
+}
 fn parse_identifier(
     spec: &Syntax<Symbol>,
     symbol: Symbol,
