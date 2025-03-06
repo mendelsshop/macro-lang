@@ -370,7 +370,7 @@ fn parse_all_from_module(
         prefix_symbol
             .clone()
             .map_or::<Symbol, _>(sym.clone(), |prefix_symbol| {
-                Symbol(format!("{prefix_symbol}{}", sym.0).into(), sym.1)
+                Symbol(format!("{prefix_symbol}{}", sym.0).into())
             })
     };
     let mut found = HashSet::new();

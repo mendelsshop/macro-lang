@@ -215,7 +215,7 @@ pub enum Ast {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct Symbol(pub Rc<str>, pub usize);
+pub struct Symbol(pub Rc<str>);
 impl Symbol {
     pub(crate) fn datum_to_syntax(
         self,
@@ -250,23 +250,19 @@ impl From<f64> for Ast {
 }
 impl fmt::Display for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.1 == 0 {
-            write!(f, "{}", self.0)
-        } else {
-            write!(f, "{}{}", self.0, self.1)
-        }
+        write!(f, "{}", self.0)
     }
 }
 
 impl From<Rc<str>> for Symbol {
     fn from(value: Rc<str>) -> Self {
-        Self(value, 0)
+        Self(value)
     }
 }
 
 impl From<&str> for Symbol {
     fn from(value: &str) -> Self {
-        Self(value.into(), 0)
+        Self(value.into())
     }
 }
 

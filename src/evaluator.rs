@@ -159,7 +159,7 @@ impl Evaluator {
     pub(crate) fn eval(expr: Ast, env: EnvRef) -> Result<Values, String> {
         match expr {
             Ast::Pair(list) => match list.0 {
-                Ast::Symbol(Symbol(ref lambda, 0)) if **lambda == *"lambda" => {
+                Ast::Symbol(Symbol(ref lambda)) if **lambda == *"lambda" => {
                     let Pair(ref lambda_id, Ast::Pair(ref inner)) = *list else {
                         Err(format!("invalid syntax {list:?} bad lambda"))?
                     };
@@ -179,7 +179,7 @@ impl Evaluator {
                         Box::new(args),
                     )))))
                 }
-                Ast::Symbol(Symbol(quote, 0)) if *quote == *"quote" => {
+                Ast::Symbol(Symbol(quote)) if *quote == *"quote" => {
                     let Pair(_, Ast::Pair(datum)) = *list else {
                         Err("bad syntax, quote requires one expression")?
                     };
@@ -188,10 +188,10 @@ impl Evaluator {
                     };
                     Ok(Values::Single(datum))
                 }
-                Ast::Symbol(Symbol(begin, 0)) if *begin == *"begin" => {
+                Ast::Symbol(Symbol(begin)) if *begin == *"begin" => {
                     Self::eval_sequence(list.1, env)
                 }
-                Ast::Symbol(Symbol(begin, 0)) if *begin == *"begin0" => {
+                Ast::Symbol(Symbol(begin)) if *begin == *"begin0" => {
                     let vec = list.1.to_list_checked()?;
                     if vec.is_empty() {
                         return Err("expected at least one expression in begin".to_string());
@@ -202,7 +202,7 @@ impl Evaluator {
                         .try_collect()?;
                     Ok(results.remove(0))
                 }
-                Ast::Symbol(Symbol(expression, 0)) if *expression == *"#%expression" => {
+                Ast::Symbol(Symbol(expression)) if *expression == *"#%expression" => {
                     let Pair(_, Ast::Pair(datum)) = *list else {
                         Err("bad syntax, #%expression requires one expression")?
                     };
@@ -211,7 +211,7 @@ impl Evaluator {
                     };
                     Self::eval(datum, env)
                 }
-                Ast::Symbol(Symbol(letrec_values, 0)) if &*letrec_values == "letrec-values" => {
+                Ast::Symbol(Symbol(letrec_values)) if &*letrec_values == "letrec-values" => {
                     let (values, bodies) = Self::check_let(&letrec_values, list.1)?;
                     let env = Env::new_scope(env);
                     values.into_iter().try_for_each(|(mut ids, value)| {
@@ -230,7 +230,7 @@ impl Evaluator {
                     })?;
                     Self::eval(bodies, env)
                 }
-                Ast::Symbol(Symbol(let_values, 0)) if &*let_values == "let-values" => {
+                Ast::Symbol(Symbol(let_values)) if &*let_values == "let-values" => {
                     let (values, bodies) = Self::check_let(&let_values, list.1)?;
                     let values = values.into_iter().map(|(mut ids, value)| {
                         let value = Self::eval(value, Rc::clone(&env))?;

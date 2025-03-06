@@ -191,7 +191,7 @@ impl Reader {
             },
 
             (first, second, last) => Ok((
-                Ast::Symbol(Symbol(format!("{first}{second}{last}").into(), 0)),
+                Ast::Symbol(Symbol(format!("{first}{second}{last}").into())),
                 input,
             )),
         }
@@ -207,7 +207,7 @@ impl Reader {
     // constraints input.next() == Some(c) if c != whitespace or comment or paren
     pub(crate) fn read_symbol(input: Input) -> ReaderInnerResult {
         let (symbol, input) = Self::read_symbol_inner(input);
-        Ok((Ast::Symbol(Symbol(symbol.into(), 0)), input))
+        Ok((Ast::Symbol(Symbol(symbol.into())), input))
     }
 
     pub(crate) fn read_list(

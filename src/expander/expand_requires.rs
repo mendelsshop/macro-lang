@@ -462,10 +462,8 @@ fn perform_require(
                         done_symbols.insert(s.clone());
                     })
                     .map(SymbolOrSyntax::Symbol),
-                // TODO: symbol number properly
                 Some(Adjust::Prefix { symbol: adjust }) => Some(SymbolOrSyntax::Symbol(Symbol(
                     format!("{adjust}{}", symbol.0).into(),
-                    symbol.1,
                 ))),
                 Some(Adjust::AllExcept {
                     prefix_symbol,
@@ -478,7 +476,6 @@ fn perform_require(
                     .is_none()
                     .then_some(SymbolOrSyntax::Symbol(Symbol(
                         format!("{prefix_symbol}{}", symbol.0).into(),
-                        symbol.1,
                     ))),
                 Some(Adjust::Rename { to_id, from_symbol }) => (from_symbol == symbol).then(|| {
                     done_symbols.insert(symbol.clone());

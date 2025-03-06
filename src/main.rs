@@ -34,7 +34,7 @@ impl UniqueNumberManager {
         )))
     }
     pub fn gen_sym(name: impl ToString) -> Symbol {
-        Symbol(name.to_string().into(), UniqueNumberManager::next())
+        Symbol(format!("{}{}", name.to_string(), UniqueNumberManager::next()).into())
     }
     pub fn new_multi_scope() -> Scope {
         Scope::ShiftedMultiScope(ShiftedMultiScope(

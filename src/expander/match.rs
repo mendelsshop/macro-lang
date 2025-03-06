@@ -24,9 +24,9 @@ pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Op
             r#match(s.0, pattern, original_s)
         } else if let Ast::Pair(pattern) = pattern {
             match (*pattern.clone(), s) {
-                (Pair(fst, Ast::Pair(second)), s) if matches!(&second.0, Ast::Symbol(Symbol(str,_ )) if ["...", "...+"].contains(&&**str)) =>
+                (Pair(fst, Ast::Pair(second)), s) if matches!(&second.0, Ast::Symbol(Symbol(str )) if ["...", "...+"].contains(&&**str)) =>
                 {
-                    let Ast::Symbol(Symbol(str, _)) = second.0 else {
+                    let Ast::Symbol(Symbol(str)) = second.0 else {
                         panic!()
                     };
                     let flat_s = s.to_synax_list();
@@ -108,7 +108,7 @@ pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Op
 
 fn make_empty_vars(pattern: Ast) -> HashMap<Symbol, Ast> {
     match pattern {
-        Ast::Pair(first) if matches!(&first.1, Ast::Pair(second) if matches!(&second.0, Ast::Symbol(Symbol(str,_ )) if ["...", "...+"].contains(&&**str))) =>
+        Ast::Pair(first) if matches!(&first.1, Ast::Pair(second) if matches!(&second.0, Ast::Symbol(Symbol(str)) if ["...", "...+"].contains(&&**str))) =>
         {
             let fst = first.0;
             make_empty_vars(fst)
