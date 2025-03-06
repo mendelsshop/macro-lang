@@ -160,7 +160,7 @@ fn list_to_cons<T>(list: impl DoubleEndedIterator<Item = T>, mut f: impl FnMut(T
 impl Expander {
     fn add_local_bindings(&mut self, ids: Vec<Syntax<Symbol>>) -> Vec<Symbol> {
         ids.into_iter()
-            .map(|id| self.add_local_binding(id))
+            .map(|id| Self::add_local_binding(id))
             .collect()
     }
     pub fn add_core_forms(&mut self) {
@@ -190,6 +190,10 @@ impl Expander {
         self.add_core_form("begin-for-syntax".into(), Self::core_form_begin_for_syntax);
         self.add_core_form("#%require".into(), Self::core_form_require);
         self.add_core_form("#%provide".into(), Self::core_form_define_provide);
+        // from expand_module
+        self.add_core_form("module".into(), Self::core_form_module);
+        self.add_core_form("module*".into(), Self::core_form_module_star);
+        self.add_core_form("#%module-begin".into(), Self::core_form_module_begin);
     }
 
     fn make_lambda_expander(

@@ -22,6 +22,7 @@ mod duplicate_check;
 pub mod expand;
 mod expand_context;
 mod expand_expr;
+mod expand_module;
 mod expand_provide;
 mod expand_requires;
 mod expand_top_level;
