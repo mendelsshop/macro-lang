@@ -1,4 +1,17 @@
-use crate::ast::Ast;
+use std::collections::BTreeSet;
+
+use itertools::Either;
+
+use crate::{
+    ast::{scope::Scope, syntax::Syntax, Ast, Symbol},
+    expander::{
+        expand_requires::perform_initial_require,
+        module_path::{build_module_name, ModulePath, SubModulePathElement},
+        r#match::match_syntax,
+        require_and_provide::RequiresAndProvides,
+    },
+    sexpr, UniqueNumberManager,
+};
 
 use super::{
     expand_context::{Context, ExpandContext},
@@ -53,6 +66,79 @@ impl Expander {
         enclosing_self: Option<ResolvedModulePath>,
         keep_enclosing_scope_at_phase: Phase,
     ) -> Result<Ast, String> {
+        let m = match_syntax(
+            syntax,
+            sexpr!((module "id:module-name" "initial-require" body "...")),
+        )?;
+        let initial_require = m("initial-require".into())
+            .ok_or("internal error")?
+            .syntax_to_datum();
+        let for_submodule = enclosing_self.is_some();
+        let keep_enclosing_scope_at_phase_or_initial_require = (keep_enclosing_scope_at_phase
+            != Phase::Label)
+            .then_some(Either::Left(keep_enclosing_scope_at_phase))
+            .or_else(|| {
+                TryInto::<ModulePath>::try_into(initial_require)
+                    .ok()
+                    .map(Either::Right)
+            })
+            .ok_or(format!(
+                "no a module path: {}",
+                m("initial-require".into()).ok_or("internal error")?
+            ))?;
+        let outside_scope = UniqueNumberManager::new_scope();
+        let inside_scope = UniqueNumberManager::new_scope();
+        let new_module_scopes = {
+            let mut scopes = BTreeSet::from([inside_scope.clone(), outside_scope.clone()]);
+            if keep_enclosing_scope_at_phase != Phase::Label {
+                scopes.extend(context.module_scopes.clone());
+            }
+            scopes
+        };
+        let value = m("id:module-name".into()).ok_or("internal error")?;
+        let original = format!("{value}");
+        let self_path = build_module_name(
+            &SubModulePathElement::from(Syntax::<Symbol>::try_from(value)?.0),
+            enclosing_self.clone(),
+            &original,
+        )?;
+        let module_namespace = context
+            .namespace
+            .make_module_namespace(self_path.clone(), for_submodule);
+        let apply_module_scopes = make_apply_module_scopes(
+            outside_scope,
+            inside_scope,
+            context,
+            keep_enclosing_scope_at_phase != Phase::Label,
+        );
+        let bodies = m("body".into())
+            .ok_or("internal error")?
+            .map(|b| Ok(apply_module_scopes(b)))?;
+        let require_and_provides = RequiresAndProvides::default();
+        match keep_enclosing_scope_at_phase_or_initial_require {
+            Either::Left(phase) => {
+                let module = enclosing_self.unwrap_or_else(|| unreachable!());
+                require_and_provides.add_required_module(module.clone(), phase);
+                module_namespace.namespace_module_visit(&module, keep_enclosing_scope_at_phase)?;
+            }
+            Either::Right(initial_require) => perform_initial_require(
+                initial_require,
+                Some(self_path),
+                &m("initial-require".into()).ok_or("internal error")?,
+                module_namespace,
+                require_and_provides,
+            )?,
+        }
+        let phase = Phase::Normal(0);
         todo!()
     }
+}
+
+fn make_apply_module_scopes(
+    outside_scope: Scope,
+    inside_scope: Scope,
+    context: ExpandContext,
+    keep_enclosing_scope_at_phase: bool,
+) -> impl Fn(Ast) -> Ast {
+    |syntax| todo!()
 }

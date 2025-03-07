@@ -310,14 +310,14 @@ impl ModulePath {
                 sub_module_path_elements
                     .into_iter()
                     .try_fold(enclosing, |enclosing, s| {
-                        build_module_name(s, enclosing, &original)
+                        build_module_name(s, enclosing, &original).map(Some)
                     })
             }
             ModulePath::Submodule(SubModuleType::Current, sub_module_path_elements) => {
                 sub_module_path_elements
                     .into_iter()
                     .try_fold(enclosing, |enclosing, s| {
-                        build_module_name(s, enclosing, &original)
+                        build_module_name(s, enclosing, &original).map(Some)
                     })
             }
 
@@ -326,44 +326,42 @@ impl ModulePath {
                 sub_module_path_elements,
             ) => sub_module_path_elements.into_iter().try_fold(
                 ModulePath::Root(root_module_path).resolve_module_path(enclosing)?,
-                |enclosing, s| build_module_name(s, enclosing, &original),
+                |enclosing, s| build_module_name(s, enclosing, &original).map(Some),
             ),
             _ => Err(format!("not a supported module path: {original}")),
         }
     }
 }
 
-fn build_module_name(
+pub fn build_module_name(
     s: &SubModulePathElement,
     enclosing: Option<ResolvedModulePath>,
     original: &str,
-) -> Result<Option<ResolvedModulePath>, String> {
+) -> Result<ResolvedModulePath, String> {
     match enclosing {
-        None => Ok(Some(ResolvedModulePath::Symbol(s.clone().into()))),
-        Some(ResolvedModulePath::Symbol(enclosing)) => {
-            Ok(Some(ResolvedModulePath::List(Rc::new([
-                enclosing,
-                s.clone().into(),
-            ]))))
-        }
+        None => Ok(ResolvedModulePath::Symbol(s.clone().into())),
+        Some(ResolvedModulePath::Symbol(enclosing)) => Ok(ResolvedModulePath::List(Rc::new([
+            enclosing,
+            s.clone().into(),
+        ]))),
         Some(ResolvedModulePath::List(enclosing)) if matches!(s, SubModulePathElement::Up) => {
             let (last, enclosing) = enclosing
                 .split_last()
                 .ok_or(format!("too many \"..\"s: {original}"))?;
             if enclosing.is_empty() {
-                Ok(Some(ResolvedModulePath::Symbol(last.clone())))
+                Ok(ResolvedModulePath::Symbol(last.clone()))
             } else {
-                Ok(Some(ResolvedModulePath::List(enclosing.into())))
+                Ok(ResolvedModulePath::List(enclosing.into()))
             }
         }
-        Some(ResolvedModulePath::List(enclosing)) => Ok(Some(ResolvedModulePath::List(
+        Some(ResolvedModulePath::List(enclosing)) => Ok(ResolvedModulePath::List(
             enclosing
                 .clone()
                 .into_iter()
                 .cloned()
                 .chain(iter::once(s.clone().into()))
                 .collect(),
-        ))),
+        )),
     }
 }
 
@@ -396,7 +394,14 @@ pub enum SubModulePathElement {
     Up,
     Identifier(Symbol),
 }
-
+impl From<Symbol> for SubModulePathElement {
+    fn from(value: Symbol) -> Self {
+        match &*value.0 {
+            ".." => SubModulePathElement::Up,
+            _ => SubModulePathElement::Identifier(value),
+        }
+    }
+}
 impl From<SubModulePathElement> for Symbol {
     fn from(value: SubModulePathElement) -> Self {
         match value {

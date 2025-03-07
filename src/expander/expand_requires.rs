@@ -392,7 +392,7 @@ fn identifiers_to_symbol_set(ids: Ast) -> Result<HashSet<Symbol>, String> {
         Ok(HashSet::new()),
     )?
 }
-fn perform_initial_require(
+pub fn perform_initial_require(
     module_path: ModulePath,
     this: Option<ResolvedModulePath>,
     in_syntax: &Ast,

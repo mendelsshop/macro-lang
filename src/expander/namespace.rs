@@ -95,7 +95,7 @@ impl Default for NameSpace {
 }
 
 impl NameSpace {
-    fn make_module_namespace(&mut self, name: ResolvedModuleName, for_submodule: bool) -> Self {
+    pub fn make_module_namespace(&self, name: ResolvedModuleName, for_submodule: bool) -> Self {
         let module_namespace = NameSpace {
             submodule_declarations: if for_submodule {
                 self.submodule_declarations.clone()
