@@ -23,7 +23,7 @@ pub struct ExpandContext {
     pub(crate) only_immediate: bool,
     pub(crate) post_expansion_scope: Option<Scope>,
     pub(crate) module_begin_k:
-        Option<Rc<dyn Fn(&mut Expander, Ast, ExpandContext) -> Result<Ast, String>>>,
+        Option<Rc<dyn for<'a> Fn(&mut Expander, Ast, ExpandContext) -> Result<Ast, String>>>,
 }
 
 impl std::fmt::Debug for ExpandContext {

@@ -79,7 +79,7 @@ pub fn parse_and_perform_requires(
     this: Option<ResolvedModulePath>,
     module_namespace: &NameSpace,
     phase_shift: Phase,
-    requires_and_provide: RequiresAndProvides,
+    requires_and_provide: &RequiresAndProvides,
     run: bool,
 ) -> Result<(), String> {
     fn parse_and_perform_requires_loop(
@@ -91,7 +91,7 @@ pub fn parse_and_perform_requires(
         layer: Layer,
         this: Option<ResolvedModulePath>,
         module_namespace: &NameSpace,
-        requires_and_provide: RequiresAndProvides,
+        requires_and_provide: &RequiresAndProvides,
         run: bool,
     ) -> Result<(), String> {
         reqs.to_list_checked()?.into_iter().try_for_each(|req| {
@@ -168,7 +168,7 @@ pub fn parse_and_perform_requires(
                         Layer::Phaseless,
                         this.clone(),
                         module_namespace,
-                        requires_and_provide.clone(),
+                        requires_and_provide,
                         run,
                     )
                 }
@@ -185,7 +185,7 @@ pub fn parse_and_perform_requires(
                         Layer::Phaseless,
                         this.clone(),
                         module_namespace,
-                        requires_and_provide.clone(),
+                        requires_and_provide,
                         run,
                     )
                 }
@@ -208,7 +208,7 @@ pub fn parse_and_perform_requires(
                         Layer::RawNoJustMeta,
                         this.clone(),
                         module_namespace,
-                        requires_and_provide.clone(),
+                        requires_and_provide,
                         run,
                     )
                 }
@@ -229,7 +229,7 @@ pub fn parse_and_perform_requires(
                         Layer::Path,
                         this.clone(),
                         module_namespace,
-                        requires_and_provide.clone(),
+                        requires_and_provide,
                         run,
                     )
                 }
@@ -250,7 +250,7 @@ pub fn parse_and_perform_requires(
                         Layer::Path,
                         this.clone(),
                         module_namespace,
-                        requires_and_provide.clone(),
+                        requires_and_provide,
                         run,
                     )
                 }
@@ -272,7 +272,7 @@ pub fn parse_and_perform_requires(
                         Layer::Path,
                         this.clone(),
                         module_namespace,
-                        requires_and_provide.clone(),
+                        requires_and_provide,
                         run,
                     )
                 }
@@ -299,7 +299,7 @@ pub fn parse_and_perform_requires(
                         Layer::Path,
                         this.clone(),
                         module_namespace,
-                        requires_and_provide.clone(),
+                        requires_and_provide,
                         run,
                     )
                 }
@@ -324,7 +324,7 @@ pub fn parse_and_perform_requires(
                         Layer::Path,
                         this.clone(),
                         module_namespace,
-                        requires_and_provide.clone(),
+                        requires_and_provide,
                         run,
                     )
                 }
@@ -343,7 +343,7 @@ pub fn parse_and_perform_requires(
                         phase_shift,
                         just_meta,
                         adjust.clone(),
-                        requires_and_provide.clone(),
+                        requires_and_provide,
                         run,
                         false,
                     )
@@ -397,7 +397,7 @@ pub fn perform_initial_require(
     this: Option<ResolvedModulePath>,
     in_syntax: &Ast,
     module_namespace: NameSpace,
-    requires_and_provide: RequiresAndProvides,
+    requires_and_provide: &RequiresAndProvides,
 ) -> Result<(), String> {
     perform_require(
         module_path,
@@ -428,7 +428,7 @@ fn perform_require(
     phase_shift: Phase,
     just_meta: JustMeta,
     adjust: Option<Adjust>,
-    requires_and_provide: RequiresAndProvides,
+    requires_and_provide: &RequiresAndProvides,
     run: bool,
     can_shadow: bool,
 ) -> Result<(), String> {

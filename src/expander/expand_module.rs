@@ -1,10 +1,11 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, rc::Rc};
 
 use itertools::Either;
 
 use crate::{
     ast::{scope::Scope, syntax::Syntax, Ast, Symbol},
     expander::{
+        expand::rebuild,
         expand_requires::perform_initial_require,
         module_path::{build_module_name, ModulePath, SubModulePathElement},
         r#match::match_syntax,
@@ -67,7 +68,7 @@ impl Expander {
         keep_enclosing_scope_at_phase: Phase,
     ) -> Result<Ast, String> {
         let m = match_syntax(
-            syntax,
+            syntax.clone(),
             sexpr!((module "id:module-name" "initial-require" body "...")),
         )?;
         let initial_require = m("initial-require".into())
@@ -107,8 +108,8 @@ impl Expander {
             .make_module_namespace(self_path.clone(), for_submodule);
         let apply_module_scopes = make_apply_module_scopes(
             outside_scope,
-            inside_scope,
-            context,
+            inside_scope.clone(),
+            context.clone(),
             keep_enclosing_scope_at_phase != Phase::Label,
         );
         let bodies = m("body".into())
@@ -123,15 +124,52 @@ impl Expander {
             }
             Either::Right(initial_require) => perform_initial_require(
                 initial_require,
-                Some(self_path),
+                Some(self_path.clone()),
                 &m("initial-require".into()).ok_or("internal error")?,
-                module_namespace,
-                require_and_provides,
+                module_namespace.clone(),
+                &require_and_provides,
             )?,
         }
         let phase = Phase::Normal(0);
-        todo!()
+        let module_begin_k = Rc::new(move |this: &mut Expander, module_begin, context| {
+            let module_begin_m = match_syntax(module_begin, sexpr!(("#%module-begin" body "...")))?;
+            todo!()
+        });
+        let module_begin = ensure_module_begin(
+            bodies,
+            inside_scope,
+            new_module_scopes.clone(),
+            context.clone(),
+            phase,
+            syntax.clone(),
+        )?;
+        let expanded_module_body = self.expand(
+            module_begin,
+            ExpandContext {
+                context: Context::ModuleBegin,
+                namespace: module_namespace,
+                module_scopes: new_module_scopes,
+                module_begin_k: Some(module_begin_k),
+                use_site_scopes: Some(Rc::default()),
+                ..context
+            },
+        )?;
+
+        let rator = sexpr!((#(m("module".into()) .ok_or("internal error")?) #( m("id:module-name".into()) .ok_or("internal error")?)#( m("initial-rquire".into()) .ok_or("internal error")?) #(expanded_module_body)));
+        Ok(require_and_provides
+            .attach_require_provide_properties(rebuild(syntax, rator), self_path))
     }
+}
+
+fn ensure_module_begin(
+    bodies: Ast,
+    inside_scope: Scope,
+    new_module_scopes: BTreeSet<Scope>,
+    context: ExpandContext,
+    phase: Phase,
+    syntax: Ast,
+) -> Result<Ast, String> {
+    todo!()
 }
 
 fn make_apply_module_scopes(

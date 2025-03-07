@@ -4,6 +4,7 @@ use crate::ast::{scope::MutableMap, syntax::Syntax, Ast, Symbol};
 
 use super::{
     binding::{Binding, ModuleBinding},
+    module_path::ResolvedModulePath,
     namespace::ResolvedModuleName,
     phase::Phase,
     Expander,
@@ -116,7 +117,7 @@ impl RequiresAndProvides {
         })
     }
     // TODO: better way to handle syntax property mabye add ast hashmap
-    fn attach_require_provide_property<T>(&self, s: Syntax<T>, phase: Phase) -> Ast {
+    pub fn attach_require_provide_properties(&self, s: Ast, self_path: ResolvedModulePath) -> Ast {
         todo!()
     }
 }

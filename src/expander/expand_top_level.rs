@@ -45,7 +45,7 @@ impl Expander {
                     None,
                     &ctx.namespace,
                     ctx.phase,
-                    RequiresAndProvides::default(),
+                    &RequiresAndProvides::default(),
                     false,
                 )
             })
