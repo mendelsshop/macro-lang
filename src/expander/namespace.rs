@@ -58,6 +58,7 @@ impl Module {
     }
 }
 #[derive(Clone, Debug)]
+// TODO: in most places does it make sense to pass by reference instead of cloning up and down
 pub struct NameSpace {
     pub scope: Scope,
     // TODO: maybe use ecs/global database structure as opposed to rc refcelling everything - could

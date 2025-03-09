@@ -11,7 +11,10 @@ use crate::{ast::Pair, Ast, Symbol};
 //  concantinating the values of all a in hash and hash1 into new hashmap
 // just used internally to "parse" stuff
 // TODO: maybe have a recursive data structure that represents a match instead of using lists
-pub fn match_syntax(original: Ast, pattern: Ast) -> Result<impl Fn(Symbol) -> Option<Ast>, String> {
+pub fn match_syntax(
+    original: Ast,
+    pattern: Ast,
+) -> Result<impl Fn(Symbol) -> Option<Ast> + Clone, String> {
     fn r#match(s: Ast, pattern: Ast, original_s: &Ast) -> Result<HashMap<Symbol, Ast>, String> {
         // TODO: make sure pattern mathches ^id
         if let Ast::Symbol(pattern) = pattern {

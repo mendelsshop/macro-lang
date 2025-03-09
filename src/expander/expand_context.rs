@@ -11,6 +11,7 @@ pub enum Context {
     Expression,
     TopLevel,
 }
+// TODO: in most places does it make sense to pass by reference instead of cloning up and down
 #[derive(Clone)]
 pub struct ExpandContext {
     pub(crate) scopes: BTreeSet<Scope>,

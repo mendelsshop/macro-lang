@@ -85,7 +85,7 @@ impl RequiresAndProvides {
             .and_then(|require| Ref::filter_map(require, |require| require.get(&phase)).ok())
     }
 
-    fn reset_provides(&self) {
+    pub fn reset_provides(&self) {
         self.provides.clear();
     }
 

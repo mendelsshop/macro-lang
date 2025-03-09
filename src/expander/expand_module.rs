@@ -3,7 +3,11 @@ use std::{collections::BTreeSet, rc::Rc};
 use itertools::Either;
 
 use crate::{
-    ast::{scope::Scope, syntax::Syntax, Ast, Symbol},
+    ast::{
+        scope::{AdjustScope, Scope},
+        syntax::Syntax,
+        Ast, Symbol,
+    },
     expander::{
         expand::rebuild,
         expand_requires::perform_initial_require,
@@ -17,6 +21,7 @@ use crate::{
 use super::{
     expand_context::{Context, ExpandContext},
     module_path::ResolvedModulePath,
+    namespace::NameSpace,
     phase::Phase,
     Expander,
 };
@@ -118,7 +123,7 @@ impl Expander {
         let require_and_provides = RequiresAndProvides::default();
         match keep_enclosing_scope_at_phase_or_initial_require {
             Either::Left(phase) => {
-                let module = enclosing_self.unwrap_or_else(|| unreachable!());
+                let module = enclosing_self.as_ref().unwrap_or_else(|| unreachable!());
                 require_and_provides.add_required_module(module.clone(), phase);
                 module_namespace.namespace_module_visit(&module, keep_enclosing_scope_at_phase)?;
             }
@@ -127,14 +132,91 @@ impl Expander {
                 Some(self_path.clone()),
                 &m("initial-require".into()).ok_or("internal error")?,
                 module_namespace.clone(),
-                &require_and_provides,
+                &require_and_provides.clone(),
             )?,
         }
         let phase = Phase::Normal(0);
-        let module_begin_k = Rc::new(move |this: &mut Expander, module_begin, context| {
-            let module_begin_m = match_syntax(module_begin, sexpr!(("#%module-begin" body "...")))?;
-            todo!()
-        });
+        let module_begin_k = {
+            // cloning so can be used after fn
+            let require_and_provides = require_and_provides.clone();
+            let inside_scope = inside_scope.clone();
+            let module_namespace = module_namespace.clone();
+            let new_module_scopes = new_module_scopes.clone();
+            let syntax = syntax.clone();
+            let self_path = self_path.clone();
+            let enclosing_self = enclosing_self.clone();
+            let m = m.clone();
+            Rc::new(
+                move |this: &mut Expander, module_begin: Ast, context: ExpandContext| {
+                    // cloning so not fully moved by fn
+                    let require_and_provides = require_and_provides.clone();
+                    let inside_scope = inside_scope.clone();
+                    let module_namespace = module_namespace.clone();
+                    let new_module_scopes = new_module_scopes.clone();
+                    let syntax = syntax.clone();
+                    let self_path = self_path.clone();
+                    let m = m.clone();
+                    let enclosing_self = enclosing_self.clone();
+                    let module_begin_m =
+                        match_syntax(module_begin.clone(), sexpr!(("#%module-begin" body "...")))?;
+                    require_and_provides.reset_provides();
+                    let bodies = module_begin_m("body".into())
+                        .ok_or("internal error")?
+                        .map(|b| Ok(b.add_scope(inside_scope.clone())))?;
+                    let expression_expanded_bodys = pass_1_and_2_loop(
+                        bodies,
+                        phase,
+                        context.clone(),
+                        module_namespace.clone(),
+                        new_module_scopes.clone(),
+                        syntax.clone(),
+                        self_path.clone(),
+                        require_and_provides.clone(),
+                    )?;
+                    let fully_expanded_bodys_except_post_submodules = resolve_provides(
+                        expression_expanded_bodys,
+                        syntax.clone(),
+                        require_and_provides.clone(),
+                        phase,
+                        self_path.clone(),
+                        context.clone(),
+                    )?;
+                    let submodule_context = ExpandContext {
+                        namespace: module_namespace.clone(),
+                        module_scopes: new_module_scopes,
+                        ..context
+                    };
+                    let declare_enclosing_module = {
+                        let fully_expanded_bodys_except_post_submodules =
+                            fully_expanded_bodys_except_post_submodules.clone();
+                        let self_path = self_path.clone();
+                        let module_begin_m = module_begin_m.clone();
+                        move || {
+                            declare_module_for_expansion(
+                                fully_expanded_bodys_except_post_submodules.clone(),
+                                m.clone(),
+                                module_begin_m.clone(),
+                                require_and_provides.clone(),
+                                module_namespace.clone(),
+                                self_path.clone(),
+                                enclosing_self.clone(),
+                            )
+                        }
+                    };
+                    let fully_expanded_bodys = expand_post_submodules(
+                        fully_expanded_bodys_except_post_submodules,
+                        declare_enclosing_module,
+                        syntax,
+                        self_path,
+                        submodule_context,
+                    )?;
+                    Ok(rebuild(
+                        module_begin,
+                        sexpr!((#(module_begin_m("#%module-begin".into()).ok_or("internal error")?) . #(fully_expanded_bodys))),
+                    ))
+                },
+            )
+        };
         let module_begin = ensure_module_begin(
             bodies,
             inside_scope,
@@ -159,6 +241,52 @@ impl Expander {
         Ok(require_and_provides
             .attach_require_provide_properties(rebuild(syntax, rator), self_path))
     }
+}
+
+fn expand_post_submodules(
+    fully_expanded_bodys_except_post_submodules: Ast,
+    declare_enclosing_module: impl FnMut() -> Result<Ast, String>,
+    syntax: Ast,
+    self_path: ResolvedModulePath,
+    submodule_context: ExpandContext,
+) -> Result<Ast, String> {
+    todo!()
+}
+
+fn declare_module_for_expansion(
+    fully_expanded_bodys_except_post_submodules: Ast,
+    m: impl Fn(Symbol) -> Option<Ast>,
+    module_begin_m: impl Fn(Symbol) -> Option<Ast>,
+    require_and_provides: RequiresAndProvides,
+    module_namespace: NameSpace,
+    self_path: ResolvedModulePath,
+    enclosing_self: Option<ResolvedModulePath>,
+) -> Result<Ast, String> {
+    todo!()
+}
+
+fn resolve_provides(
+    expression_expanded_bodys: Ast,
+    syntax: Ast,
+    require_and_provides: RequiresAndProvides,
+    phase: Phase,
+    self_path: ResolvedModulePath,
+    context: ExpandContext,
+) -> Result<Ast, String> {
+    todo!()
+}
+
+fn pass_1_and_2_loop(
+    bodies: Ast,
+    phase: Phase,
+    context: ExpandContext,
+    module_namespace: NameSpace,
+    new_module_scopes: BTreeSet<Scope>,
+    syntax: Ast,
+    self_path: ResolvedModulePath,
+    require_and_provides_clone: RequiresAndProvides,
+) -> Result<Ast, String> {
+    todo!()
 }
 
 fn ensure_module_begin(
