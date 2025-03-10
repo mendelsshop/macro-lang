@@ -110,91 +110,34 @@ pub fn match_syntax(
 }
 
 macro_rules! match_syntax {
-    (@matcher($original:expr, $syntax:expr)) => {
-        if $syntax != Ast::TheEmptyList {
-            return Err(format!("bad syntax {}", $original));
-        }
-    };
-    (@matcher($original:expr,$syntax:expr) . $symbol:ident:id) => {
-        if !$syntax.identifier() {
-            return Err(format!("not an identifier {}", $syntax));
-        }
-    };
-    (@matcher($original:expr,$syntax:expr) . $symbol:ident) => {
-    };
-    (@matcher($original:expr,$syntax:expr) . ($($tt:tt)*)) => {
-        match_syntax!(@matcher($original,$syntax)$($tt)*);
-    };
-
-    (@matcher($original:expr,$syntax:expr) $symbol:ident:id ...) => {
-        let mut expr = $syntax;
-        while let Ast::Pair(pair) = expr {
-            if !pair.0.identifier() {
-                return Err(format!("not an identifier {}", pair.0));
+   (@matcher($this:expr, $original:expr,$syntax:expr) $symbol:ident:id ...+) => {
+        let result = $syntax.map_to_syntax_list(
+            |ident|{
+                if !ident.identifier() {
+                    return Err(format!("not an identifier {}", ident));
+                } else {
+                Ok(ident)
+                }
             }
-            expr = pair.1;
-            if let Ast::Syntax(s) = expr {
-                expr = s.0
-            }
-        }
-    };
-    (@matcher($original:expr,$syntax:expr) $symbol:ident ...) => {
-        let mut expr = $syntax;
-        while let Ast::Pair(pair) = expr {
-            expr = pair.1;
-            if let Ast::Syntax(s) = expr {
-                expr = s.0
-            }
-        }
-
-    };
-    (@matcher($original:expr,$syntax:expr) ($($tt:tt)*) ...) => {
-        let mut expr = $syntax;
-        while let Ast::Pair(pair) = expr {
-            match_syntax!(@matcher($original,pair.0)$($tt)*);
-            expr = pair.1;
-            if let Ast::Syntax(s) = expr {
-                expr = s.0
-            }
-        }
-    };
-    (@matcher($original:expr,$syntax:expr) $symbol:ident:id ...+) => {
-        let mut expr = $syntax;
-        let mut found = false;
-        while let Ast::Pair(pair) = expr {
-            found = true;
-            if !pair.0.identifier() {
-                return Err(format!("not an identifier {}", pair.0));
-            }
-            expr = pair.1;
-            if let Ast::Syntax(s) = expr {
-                expr = s.0
-            }
-        }
-        if !found {
-            return Err(format!("bad syntax {}, expected one or more {}:id",$original, stringify!($symbol)));
-        }
-    };
-    (@macther($original:expr,$syntax:expr) $symbol:ident ...+) => {
-        let mut expr = $syntax;
-        let mut found = false;
-        while let Ast::Pair(pair) = expr {
-            found = true;
-            expr = pair.1;
-            if let Ast::Syntax(s) = expr {
-                expr = s.0
-            }
-        }
-        if !found {
+        )?;
+        if result == Ast::TheEmptyList  {
             return Err(format!("bad syntax {}, expected one or more {}", $original, stringify!($symbol)));
         }
+        $this.$symbol = result;
     };
-    (@matcher($original:expr,$syntax:expr) ($($tt:tt)*) ...+) => {
+    (@matcher($this:expr,$original:expr,$syntax:expr) $symbol:ident ...+) => {
+        let result = $syntax.to_synax_list();
+        if result == Ast::TheEmptyList  {
+            return Err(format!("bad syntax {}, expected one or more {}", $original, stringify!($symbol)));
+        }
+        $this.$symbol = result;
+    };
+    (@matcher($this:expr, $original:expr,$syntax:expr) ($($tt:tt)*) ...+) => {
         let mut found = false;
         let mut expr = $syntax;
         while let Ast::Pair(pair) = expr {
             found = true;
-            match_syntax!(@matcher($original,pair.0)$($tt)*);
+            match_syntax!(@matcher($this, $original,pair.0)$($tt)*);
             expr = pair.1;
             if let Ast::Syntax(s) = expr {
                 expr = s.0
@@ -204,7 +147,55 @@ macro_rules! match_syntax {
             return Err(format!("bad syntax {}, expected one or more {}", $original, stringify!(($($tt:tt)*))));
         }
     };
-    (@matcher($original:expr,$syntax:expr) $symbol:ident:id $($tt:tt)*) => {
+    (@matcher($this:expr, $original:expr, $syntax:expr)) => {
+        if $syntax != Ast::TheEmptyList {
+            return Err(format!("bad syntax {}, expected end of list", $original));
+        }
+    };
+    (@matcher($this:expr, $original:expr,$syntax:expr) . $symbol:ident:id) => {
+        if !$syntax.identifier() {
+            return Err(format!("not an identifier {}", $syntax));
+        }
+        $this.$symbol = $syntax;
+    };
+    (@matcher($this:expr, $original:expr,$syntax:expr) . $symbol:ident) => {
+            $this.$symbol = $syntax;
+    };
+    (@matcher($this:expr, $original:expr,$syntax:expr) . ($($tt:tt)*)) => {
+        match_syntax!(@matcher($this, $original,$syntax)$($tt)*);
+    };
+
+    (@matcher($this:expr, $original:expr,$syntax:expr) $symbol:ident:id ...) => {
+        let result = $syntax.map_to_syntax_list(
+            |ident|{
+                if !ident.identifier() {
+                    return Err(format!("not an identifier {}", ident));
+                } else {
+                Ok(ident)
+                }
+            }
+        )?;
+        $this.$symbol = result;
+
+    };
+    (@matcher($this:expr, $original:expr,$syntax:expr) $symbol:ident ...) => {
+        let result = $syntax.to_synax_list();
+        $this.$symbol = result;
+
+
+    };
+    (@matcher($this:expr, $original:expr,$syntax:expr) ($($tt:tt)*) ...) => {
+        let mut expr = $syntax;
+        while let Ast::Pair(pair) = expr {
+            match_syntax!(@matcher($this, $original,pair.0)$($tt)*);
+            expr = pair.1;
+            if let Ast::Syntax(s) = expr {
+                expr = s.0
+            }
+        }
+    };
+
+    (@matcher($this:expr, $original:expr,$syntax:expr) $symbol:ident:id $($tt:tt)*) => {
         let syntax = match $syntax {
             Ast::Syntax(s) => {
                 if let Ast::Pair(s) = s.0 {
@@ -220,9 +211,10 @@ macro_rules! match_syntax {
         if !syntax.0.identifier() {
             return Err(format!("not an identifier {}", syntax.0));
         }
-        match_syntax!(@matcher($original,syntax.1) $($tt)*);
+        $this.$symbol = syntax.0;
+        match_syntax!(@matcher($this, $original,syntax.1) $($tt)*);
     };
-    (@matcher($original:expr,$syntax:expr) $symbol:ident $($tt:tt)*) => {
+    (@matcher($this:expr, $original:expr,$syntax:expr) $symbol:ident $($tt:tt)*) => {
         let syntax = match $syntax {
             Ast::Syntax(s) => {
                 if let Ast::Pair(s) = s.0 {
@@ -236,9 +228,10 @@ macro_rules! match_syntax {
             _ => return Err(format!("bad syntax, {} shoud be a pair, {}", $syntax, $original))
 
         };
-        match_syntax!(@matcher($original,syntax.1) $($tt)*);
+        $this.$symbol = syntax.0;
+        match_syntax!(@matcher($this, $original,syntax.1) $($tt)*);
     };
-    (@matcher($original:expr,$syntax:expr) ($($tt:tt)*) $($tts:tt)*) => {
+    (@matcher($this:expr, $original:expr,$syntax:expr) ($($tt:tt)*) $($tts:tt)*) => {
         let syntax = match $syntax {
             Ast::Syntax(s) => {
                 if let Ast::Pair(s) = s.0 {
@@ -250,8 +243,8 @@ macro_rules! match_syntax {
             Ast::Pair(p) => p,
             _ => return Err(format!("bad syntax, {} shoud be a pair, {}", $syntax,$original))
         };
-       match_syntax!(@matcher($original, syntax.0)  $($tt)*);
-       match_syntax!(@matcher($original,syntax.1)  $($tts)*);
+       match_syntax!(@matcher($this, $original, syntax.0)  $($tt)*);
+       match_syntax!(@matcher($this, $original,syntax.1)  $($tts)*);
     };
 
     (@list($name:ident, $($ids:ident)*, $($ttl:tt)*)) => {
@@ -259,12 +252,24 @@ macro_rules! match_syntax {
         struct $name { $($ids: Ast,)* }
         impl $name {
             fn r#match(syntax: Ast) -> Result<Self, String> {
-                match_syntax!(@matcher(syntax, syntax.clone()) $($ttl)*);
+                let mut this = Self {
+                    $($ids: Ast::TheEmptyList,)*
+                };
+                match_syntax!(@matcher(this, syntax, syntax.clone()) $($ttl)*);
                 todo!()
             }
         }
     };
-    (@list($name:ident $($ids:ident)*, $($ttl:tt)*) $symbol:ident:id ...  ) => {
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) $symbol:ident:id ...+  ) => {
+        match_syntax!(@list($name, $($ids)* $symbol, $($ttl)*));
+    };
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) $symbol:ident   ...+   ) => {
+        match_syntax!(@list($name, $($ids)* $symbol,$($ttl)*))
+    };
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) ($($tt:tt)*)  ...+) => {
+       match_syntax!(@list($name, $($ids)*,$($ttl)*) $($tt)* )
+    };
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) $symbol:ident:id ...  ) => {
         match_syntax!(@list($name, $($ids)* $symbol, $($ttl)*));
     };
     (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) $symbol:ident   ...   ) => {
@@ -280,15 +285,16 @@ macro_rules! match_syntax {
         match_syntax!(@list($name, $($ids)* $symbol,$($ttl)* ) $($tt)*  )
     };
     (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) ($($tt:tt)*) $($tts:tt)*) => {
-       match_syntax!(@list($name, $($ids)*,$(ttl)*) $($tt)* $($tts)*)
+       match_syntax!(@list($name, $($ids)*,$($ttl)*) $($tt)* $($tts)*)
     };
     ($name:ident as ($($tt:tt)*)) => {
        match_syntax!(@list($name,,$($tt)*) $($tt)* )
     };
+
 }
 
 fn make_empty_vars(pattern: Ast) -> HashMap<Symbol, Ast> {
-    match_syntax!(Foo as ((bar foo:id ) ...));
+    match_syntax!(Foo as (ffss ...+ ) );
     match pattern {
         Ast::Pair(first) if matches!(&first.1, Ast::Pair(second) if matches!(&second.0, Ast::Symbol(Symbol(str)) if ["...", "...+"].contains(&&**str))) =>
         {
@@ -320,6 +326,19 @@ impl Ast {
             Self::Pair(l) => Self::Pair(Box::new(Pair(l.0, l.1.to_synax_list()))),
             Self::Syntax(s) => s.0.to_synax_list(),
             _ => self,
+        }
+    }
+    pub fn map_to_syntax_list<E>(
+        self,
+        mut f: impl FnMut(Self) -> Result<Ast, E>,
+    ) -> Result<Self, E> {
+        match self {
+            Self::Pair(l) => Ok(Self::Pair(Box::new(Pair(
+                f(l.0)?,
+                l.1.map_to_syntax_list(f)?,
+            )))),
+            Self::Syntax(s) => s.0.map_to_syntax_list(f),
+            _ => Ok(self),
         }
     }
 }
