@@ -164,15 +164,24 @@ macro_rules! match_syntax {
         if result == Ast::TheEmptyList  {
             return Err(format!("bad syntax {}, expected one or more {}", $original, stringify!($symbol)));
         }
-        $this.found.$symbol = true;
-        $this.$symbol = result;
+        if $this.found.$symbol {
+            $this.$symbol = sexpr!((#(result)));
+        } else {
+            $this.found.$symbol = true;
+            $this.$symbol = result;
+        }
     };
     (@matcher($this:expr, $original:expr, $syntax:expr, $type:ty) $symbol:ident ...+) => {
         let result = $syntax.to_synax_list();
         if result == Ast::TheEmptyList  {
             return Err(format!("bad syntax {}, expected one or more {}", $original, stringify!($symbol)));
         }
-        $this.$symbol = result;
+        if $this.found.$symbol {
+            $this.$symbol = sexpr!((#(result)));
+        } else {
+            $this.found.$symbol = true;
+            $this.$symbol = result;
+        }
     };
     (@matcher($this:expr, $original:expr, $syntax:expr, $type:ty) ($($tt:tt)*) ...+) => {
         let mut found = false;
@@ -188,7 +197,7 @@ macro_rules! match_syntax {
             let mut new = set_found();
             found = true;
             match_syntax!(@matcher(new, $original,pair.0, $type)$($tt)*);
-            current = new.merge(current);
+            current = current.merge(new);
             expr = pair.1;
             if let Ast::Syntax(s) = expr {
                 expr = s.0
@@ -208,12 +217,20 @@ macro_rules! match_syntax {
         if !$syntax.identifier() {
             return Err(format!("not an identifier {}", $syntax));
         }
-        $this.$symbol = $syntax;
-        $this.found.$symbol = true;
+        if $this.found.$symbol {
+            $this.$symbol = sexpr!((#($syntax)));
+        } else {
+            $this.found.$symbol = true;
+            $this.$symbol = $syntax;
+        }
     };
     (@matcher($this:expr, $original:expr, $syntax:expr, $type:ty) . $symbol:ident) => {
-        $this.$symbol = $syntax;
-        $this.found.$symbol = true;
+        if $this.found.$symbol {
+            $this.$symbol = sexpr!((#($syntax)));
+        } else {
+            $this.found.$symbol = true;
+            $this.$symbol = $syntax;
+        }
     };
     (@matcher($this:expr, $original:expr, $syntax:expr, $type:ty) . ($($tt:tt)*)) => {
         match_syntax!(@matcher($this, $original,$syntax, $type)$($tt)*);
@@ -229,14 +246,24 @@ macro_rules! match_syntax {
                 }
             }
         )?;
-        $this.$symbol = result;
-        $this.found.$symbol = true;
+
+        if $this.found.$symbol {
+            $this.$symbol = sexpr!((#(result)));
+        } else {
+            $this.found.$symbol = true;
+            $this.$symbol = result;
+        }
+
 
     };
     (@matcher($this:expr, $original:expr, $syntax:expr, $type:ty) $symbol:ident ...) => {
         let result = $syntax.to_synax_list();
-        $this.$symbol = result;
-        $this.found.$symbol = true;
+        if $this.found.$symbol {
+            $this.$symbol = sexpr!((#(result)));
+        } else {
+            $this.found.$symbol = true;
+            $this.$symbol = result;
+        }
     };
     (@matcher($this:expr, $original:expr, $syntax:expr, $type:ty) ($($tt:tt)*) ...) => {
         let set_found =|| {
@@ -275,8 +302,12 @@ macro_rules! match_syntax {
         if !syntax.0.identifier() {
             return Err(format!("not an identifier {}", syntax.0));
         }
-        $this.$symbol = syntax.0;
-        $this.found.$symbol = true;
+        if $this.found.$symbol {
+            $this.$symbol = sexpr!((#(syntax.0)));
+        } else {
+            $this.found.$symbol = true;
+            $this.$symbol = syntax.0;
+        }
         match_syntax!(@matcher($this, $original,syntax.1, $type) $($tt)*);
     };
     (@matcher($this:expr, $original:expr,$syntax:expr, $type:ty) $symbol:ident $($tt:tt)*) => {
@@ -293,8 +324,12 @@ macro_rules! match_syntax {
             _ => return Err(format!("bad syntax, {} shoud be a pair, {}", $syntax, $original))
 
         };
-        $this.$symbol = syntax.0;
-        $this.found.$symbol = true;
+        if $this.found.$symbol {
+            $this.$symbol = sexpr!((#(syntax.0)));
+        } else {
+            $this.found.$symbol = true;
+            $this.$symbol = syntax.0;
+        }
         match_syntax!(@matcher($this, $original,syntax.1, $type) $($tt)*);
     };
     (@matcher($this:expr, $original:expr,$syntax:expr, $type:ty) ($($tt:tt)*) $($tts:tt)*) => {
