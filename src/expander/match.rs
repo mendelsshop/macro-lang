@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use gensym::gensym;
 use itertools::Itertools;
 
 use crate::{ast::Pair, Ast, Symbol};
@@ -110,40 +109,28 @@ pub fn match_syntax(
     Ok(move |symbol| symbol_map.get(&symbol).cloned())
 }
 
-macro_rules! make_struct {
-    ($gensym:ident, $($ids:ident)*) => {{
-        #[derive(Clone)]
-        struct $gensym { $($ids: Ast,)* }
-    }};
-    ($($ids:ident)*) => {
-        gensym::gensym!(make_struct!($($ids)*));
-    };
-}
-macro_rules! make_function {
-    ($gensym:ident,($syntax:ident, $original:ident) $body:block) => {fn $gensym($syntax: Ast, $original: Ast) -> Result<Ast, String> $body
-        $gensym};
-    (($syntax:ident, $original:ident) $body:block) => {
-        gensym::gensym!(make_function!(($syntax, $original) $body));
-    };
-
-    ($gensym:ident,($syntax:ident, _) $body:block) => {fn $gensym($syntax: Ast, _: Ast) -> Result<Ast, String> $body
-        $gensym};
-    (($syntax:ident, _) $body:block) => {
-        gensym::gensym!(make_function!(($syntax, _) $body));
-    };
-}
-
 macro_rules! match_syntax {
-    (@matcher($syntax:expr)) => {
+    (@matcher($original:expr, $syntax:expr)) => {
         if $syntax != Ast::TheEmptyList {
-            return false;
+            return Err(format!("bad syntax {}", $original));
         }
     };
-    (@matcher($syntax:expr) $symbol:ident:id ...) => {
+    (@matcher($original:expr,$syntax:expr) . $symbol:ident:id) => {
+        if !$syntax.identifier() {
+            return Err(format!("not an identifier {}", $syntax));
+        }
+    };
+    (@matcher($original:expr,$syntax:expr) . $symbol:ident) => {
+    };
+    (@matcher($original:expr,$syntax:expr) . ($($tt:tt)*)) => {
+        match_syntax!(@matcher($original,$syntax)$($tt)*);
+    };
+
+    (@matcher($original:expr,$syntax:expr) $symbol:ident:id ...) => {
         let mut expr = $syntax;
         while let Ast::Pair(pair) = expr {
             if !pair.0.identifier() {
-                return false;
+                return Err(format!("not an identifier {}", pair.0));
             }
             expr = pair.1;
             if let Ast::Syntax(s) = expr {
@@ -151,7 +138,7 @@ macro_rules! match_syntax {
             }
         }
     };
-    (@matcher($syntax:expr) $symbol:ident ...) => {
+    (@matcher($original:expr,$syntax:expr) $symbol:ident ...) => {
         let mut expr = $syntax;
         while let Ast::Pair(pair) = expr {
             expr = pair.1;
@@ -161,114 +148,147 @@ macro_rules! match_syntax {
         }
 
     };
-    (@matcher($syntax:expr) ($($tt:tt)*) ...) => {
+    (@matcher($original:expr,$syntax:expr) ($($tt:tt)*) ...) => {
         let mut expr = $syntax;
         while let Ast::Pair(pair) = expr {
-            match_syntax!(@matcher(pair.0)$($tt)*);
+            match_syntax!(@matcher($original,pair.0)$($tt)*);
             expr = pair.1;
             if let Ast::Syntax(s) = expr {
                 expr = s.0
             }
         }
     };
-    (@matcher($syntax:expr) $symbol:ident:id ...+) => {
-
+    (@matcher($original:expr,$syntax:expr) $symbol:ident:id ...+) => {
+        let mut expr = $syntax;
+        let mut found = false;
+        while let Ast::Pair(pair) = expr {
+            found = true;
+            if !pair.0.identifier() {
+                return Err(format!("not an identifier {}", pair.0));
+            }
+            expr = pair.1;
+            if let Ast::Syntax(s) = expr {
+                expr = s.0
+            }
+        }
+        if !found {
+            return Err(format!("bad syntax {}, expected one or more {}:id",$original, stringify!($symbol)));
+        }
     };
-    (@macther($syntax:expr) $symbol:ident ...+) => {
-
+    (@macther($original:expr,$syntax:expr) $symbol:ident ...+) => {
+        let mut expr = $syntax;
+        let mut found = false;
+        while let Ast::Pair(pair) = expr {
+            found = true;
+            expr = pair.1;
+            if let Ast::Syntax(s) = expr {
+                expr = s.0
+            }
+        }
+        if !found {
+            return Err(format!("bad syntax {}, expected one or more {}", $original, stringify!($symbol)));
+        }
     };
-    (@matcher($syntax:expr) ($($tt:tt)*) ...+) => {
+    (@matcher($original:expr,$syntax:expr) ($($tt:tt)*) ...+) => {
+        let mut found = false;
+        let mut expr = $syntax;
+        while let Ast::Pair(pair) = expr {
+            found = true;
+            match_syntax!(@matcher($original,pair.0)$($tt)*);
+            expr = pair.1;
+            if let Ast::Syntax(s) = expr {
+                expr = s.0
+            }
+        }
+        if !found {
+            return Err(format!("bad syntax {}, expected one or more {}", $original, stringify!(($($tt:tt)*))));
+        }
     };
-    (@matcher($syntax:expr) $symbol:ident:id $($tt:tt)*) => {
+    (@matcher($original:expr,$syntax:expr) $symbol:ident:id $($tt:tt)*) => {
         let syntax = match $syntax {
             Ast::Syntax(s) => {
                 if let Ast::Pair(s) = s.0 {
                     s
                 } else {
-                    return false
+                    return Err(format!("bad syntax, {} shoud be a pair, {}",  s.0,$original));
                 }
             }
             Ast::Pair(p) => p,
-            _ => return false
+            _ => return Err(format!("bad syntax, {} shoud be a pair, {}", $syntax, $original))
         };
 
         if !syntax.0.identifier() {
-            return false;
+            return Err(format!("not an identifier {}", syntax.0));
         }
-        match_syntax!(@matcher(syntax.1) $($tt)*);
+        match_syntax!(@matcher($original,syntax.1) $($tt)*);
     };
-    (@matcher($syntax:expr) $symbol:ident $($tt:tt)*) => {
+    (@matcher($original:expr,$syntax:expr) $symbol:ident $($tt:tt)*) => {
         let syntax = match $syntax {
             Ast::Syntax(s) => {
                 if let Ast::Pair(s) = s.0 {
                     s
                 } else {
-                    return false
+                    return Err(format!("bad syntax, {} shoud be a pair, {}", s.0, $original));
+
                 }
             }
             Ast::Pair(p) => p,
-            _ => return false
+            _ => return Err(format!("bad syntax, {} shoud be a pair, {}", $syntax, $original))
+
         };
-        match_syntax!(@matcher(syntax.1) $($tt)*);
+        match_syntax!(@matcher($original,syntax.1) $($tt)*);
     };
-    (@matcher($syntax:expr) ($($tt:tt)*) $($tts:tt)*) => {
+    (@matcher($original:expr,$syntax:expr) ($($tt:tt)*) $($tts:tt)*) => {
         let syntax = match $syntax {
             Ast::Syntax(s) => {
                 if let Ast::Pair(s) = s.0 {
                     s
                 } else {
-                    return false
+                    return Err(format!("bad syntax, {} shoud be a pair, {}", s.0, $original));
                 }
             }
             Ast::Pair(p) => p,
-            _ => return false
+            _ => return Err(format!("bad syntax, {} shoud be a pair, {}", $syntax,$original))
         };
-       match_syntax!(@matcher(syntax.0)  $($tt)*);
-       match_syntax!(@matcher(syntax.1)  $($tts)*);
+       match_syntax!(@matcher($original, syntax.0)  $($tt)*);
+       match_syntax!(@matcher($original,syntax.1)  $($tts)*);
     };
 
-    (@list($($ids:ident)*)) => { make_struct!($($ids)*);};
-    (@list($($ids:ident)*) $symbol:ident:id ...  ) => {
-        match_syntax!(@list($($ids)* $symbol ));
-    };
-    (@list($($ids:ident)*) $symbol:ident   ...   ) => {
-
-        match_syntax!(@list($($ids)* $symbol )   );
-    };
-    (@list($($ids:ident)*) ($($tt:tt)*)  ...) => {
-       match_syntax!(@list($($ids)*) $($tt)* );
-    };
-    (@list($($ids:ident)*) $symbol:ident:id $($tt:tt)*  ) => {
-
-        make_function!((syntax, _) {
-            if syntax.identifier() {
-                Ok(syntax)} else {
-
-                Err(format!("not an identifier {syntax}"))
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*)) => {
+        #[derive(Clone)]
+        struct $name { $($ids: Ast,)* }
+        impl $name {
+            fn r#match(syntax: Ast) -> Result<Self, String> {
+                match_syntax!(@matcher(syntax, syntax.clone()) $($ttl)*);
+                todo!()
+            }
         }
-        });
-        match_syntax!(@list($($ids)* $symbol ) $($tt)*);
     };
-    (@list($($ids:ident)*) $symbol:ident  $($tt:tt)*   ) => {
-        make_function!((syntax, _) {Ok(syntax)});
-        match_syntax!(@list($($ids)* $symbol ) $($tt)*  );
+    (@list($name:ident $($ids:ident)*, $($ttl:tt)*) $symbol:ident:id ...  ) => {
+        match_syntax!(@list($name, $($ids)* $symbol, $($ttl)*));
     };
-    (@list($($ids:ident)*) ($($tt:tt)*) $($tts:tt)*) => {
-       match_syntax!(@list($($ids)*) $($tt)* $($tts)*);
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) $symbol:ident   ...   ) => {
+        match_syntax!(@list($name, $($ids)* $symbol,$($ttl)*))
     };
-    (($($tt:tt)*)) => {
-       //match_syntax!(@matcher $($tt)* );
-       match_syntax!(@list() $($tt)* );
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) ($($tt:tt)*)  ...) => {
+       match_syntax!(@list($name, $($ids)*,$($ttl)*) $($tt)* )
+    };
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) $symbol:ident:id $($tt:tt)*  ) => {
+        match_syntax!(@list($name, $($ids)* $symbol,$($ttl)* ) $($tt)*)
+    };
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) $symbol:ident  $($tt:tt)*   ) => {
+        match_syntax!(@list($name, $($ids)* $symbol,$($ttl)* ) $($tt)*  )
+    };
+    (@list($name:ident, $($ids:ident)*, $($ttl:tt)*) ($($tt:tt)*) $($tts:tt)*) => {
+       match_syntax!(@list($name, $($ids)*,$(ttl)*) $($tt)* $($tts)*)
+    };
+    ($name:ident as ($($tt:tt)*)) => {
+       match_syntax!(@list($name,,$($tt)*) $($tt)* )
     };
 }
 
-fn matches_new(syntax: Ast) -> bool {
-    match_syntax!(@matcher(syntax.clone()) (id:id) ...);
-    match_syntax!(@matcher(syntax) (id:id) ...);
-    return true;
-}
 fn make_empty_vars(pattern: Ast) -> HashMap<Symbol, Ast> {
-    match_syntax!(((bar foo:id ) ...));
+    match_syntax!(Foo as ((bar foo:id ) ...));
     match pattern {
         Ast::Pair(first) if matches!(&first.1, Ast::Pair(second) if matches!(&second.0, Ast::Symbol(Symbol(str)) if ["...", "...+"].contains(&&**str))) =>
         {
