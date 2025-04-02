@@ -1,5 +1,8 @@
+use crate::custom::DotDotPlus;
 use proc_macro::TokenStream;
-use syn::Ident;
+use syn::{
+    Ident, Token, ext::IdentExt, parenthesized, parse::Parse, parse_macro_input, token::DotDotDot,
+};
 // original attempt at macro using MBE just here to look at to adpat
 //macro_rules! match_syntax {
 //   (@matcher($this:expr, $original:expr, $syntax:expr, $type:ty) $symbol:ident:id ...+) => {
@@ -277,11 +280,77 @@ use syn::Ident;
 //
 //}
 
+#[derive(Clone)]
 struct MatchStruct {
     binders: Vec<Ident>,
+}
+mod custom {
+    use syn::custom_punctuation;
+
+    custom_punctuation!(DotDotPlus, ..+);
+}
+enum SExpr {
+    Many(Box<Self>, MatchStruct),
+    ManyOne(Box<Self>, MatchStruct),
+    Symbol(Ident),
+    Empty,
+    Pair {
+        car: Box<Self>,
+        cdr: Box<Self>,
+        binders: MatchStruct,
+    },
+}
+impl SExpr {
+    fn binders(&self) -> MatchStruct {
+        match self {
+            SExpr::Many(_, match_struct) => match_struct.clone(),
+            SExpr::ManyOne(_, match_struct) => match_struct.clone(),
+            SExpr::Symbol(ident) => MatchStruct {
+                binders: vec![ident.clone()],
+            },
+            SExpr::Empty => MatchStruct {
+                binders: Vec::new(),
+            },
+            SExpr::Pair {
+                car: _,
+                cdr: _,
+                binders,
+            } => binders.clone(),
+        }
+    }
+}
+impl Parse for SExpr {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let lookahead = input.lookahead1();
+        let sexpr = if lookahead.peek(Ident::peek_any) {
+            let ident = Ident::parse_any(input)?;
+            Self::Symbol(ident)
+        } else {
+            let paren_input;
+            let last = Self::Empty;
+            parenthesized!(paren_input in input);
+            while !paren_input.is_empty() {
+                let next = input.parse::<Self>()?;
+            }
+            last
+        };
+        if lookahead.peek(Token![...]) {
+            input.parse::<DotDotDot>();
+
+            let binders = sexpr.binders();
+            Ok(SExpr::Many(Box::new(sexpr), binders))
+        } else if lookahead.peek(DotDotPlus) {
+            input.parse::<DotDotPlus>();
+            let binders = sexpr.binders();
+            Ok(SExpr::ManyOne(Box::new(sexpr), binders))
+        } else {
+            Ok(sexpr)
+        }
+    }
 }
 
 #[proc_macro]
 pub fn match_syntax(input: TokenStream) -> TokenStream {
-    return input;
+    let input_ = parse_macro_input!(input as SExpr);
+    return TokenStream::new();
 }
