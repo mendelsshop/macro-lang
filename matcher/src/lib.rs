@@ -1,11 +1,9 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, process::id};
 
 use crate::custom::DotDotPlus;
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{
-    Ident, Token, ext::IdentExt, parenthesized, parse::Parse, parse_macro_input,
-};
+use syn::{Ident, Token, ext::IdentExt, parenthesized, parse::Parse, parse_macro_input};
 // original attempt at macro using MBE just here to look at to adpat
 //macro_rules! match_syntax {
 //   (@matcher($this:expr, $original:expr, $syntax:expr, $type:ty) $symbol:ident:id ...+) => {
@@ -297,6 +295,8 @@ enum SExpr {
     Many(Box<Self>, MatchStruct),
     ManyOne(Box<Self>, MatchStruct),
     Symbol(Ident),
+    // only matches identifiers
+    Identifier(Ident),
     Empty,
     Pair {
         car: Box<Self>,
@@ -310,6 +310,9 @@ impl SExpr {
             SExpr::Many(_, match_struct) => match_struct.clone(),
             SExpr::ManyOne(_, match_struct) => match_struct.clone(),
             SExpr::Symbol(ident) => MatchStruct {
+                binders: HashSet::from([ident.clone()]),
+            },
+            SExpr::Identifier(ident) => MatchStruct {
                 binders: HashSet::from([ident.clone()]),
             },
             SExpr::Empty => MatchStruct {
@@ -327,7 +330,11 @@ impl Parse for SExpr {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let sexpr = if input.peek(Ident::peek_any) {
             let ident = Ident::parse_any(input)?;
-            Self::Symbol(ident)
+            if ident.to_string() == "id" || ident.to_string().ends_with(":id") {
+                Self::Identifier(ident)
+            } else {
+                Self::Symbol(ident)
+            }
         } else {
             let paren_input;
             parenthesized!(paren_input in input);
@@ -406,6 +413,11 @@ pub fn match_syntax(input: TokenStream) -> TokenStream {
     quote! {
         struct Matcher {
             #(  #binders: Ast, )*
+        }
+        impl Matcher {
+            fn matches(s: Ast) -> Result<Self, String> {
+                todo!()
+            }
         }
     }
     .into()
