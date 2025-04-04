@@ -1,7 +1,10 @@
+use std::collections::HashSet;
+
 use crate::custom::DotDotPlus;
 use proc_macro::TokenStream;
+use quote::quote;
 use syn::{
-    Ident, Token, ext::IdentExt, parenthesized, parse::Parse, parse_macro_input, token::DotDotDot,
+    Ident, Token, ext::IdentExt, parenthesized, parse::Parse, parse_macro_input,
 };
 // original attempt at macro using MBE just here to look at to adpat
 //macro_rules! match_syntax {
@@ -280,15 +283,16 @@ use syn::{
 //
 //}
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct MatchStruct {
-    binders: Vec<Ident>,
+    binders: HashSet<Ident>,
 }
 mod custom {
     use syn::custom_punctuation;
 
     custom_punctuation!(DotDotPlus, ..+);
 }
+#[derive(Debug)]
 enum SExpr {
     Many(Box<Self>, MatchStruct),
     ManyOne(Box<Self>, MatchStruct),
@@ -306,10 +310,10 @@ impl SExpr {
             SExpr::Many(_, match_struct) => match_struct.clone(),
             SExpr::ManyOne(_, match_struct) => match_struct.clone(),
             SExpr::Symbol(ident) => MatchStruct {
-                binders: vec![ident.clone()],
+                binders: HashSet::from([ident.clone()]),
             },
             SExpr::Empty => MatchStruct {
-                binders: Vec::new(),
+                binders: HashSet::new(),
             },
             SExpr::Pair {
                 car: _,
@@ -321,26 +325,21 @@ impl SExpr {
 }
 impl Parse for SExpr {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let lookahead = input.lookahead1();
-        let sexpr = if lookahead.peek(Ident::peek_any) {
+        let sexpr = if input.peek(Ident::peek_any) {
             let ident = Ident::parse_any(input)?;
             Self::Symbol(ident)
         } else {
             let paren_input;
-            let last = Self::Empty;
             parenthesized!(paren_input in input);
-            while !paren_input.is_empty() {
-                let next = input.parse::<Self>()?;
-            }
-            last
+            parse_paren(&paren_input)?
         };
-        if lookahead.peek(Token![...]) {
-            input.parse::<DotDotDot>();
+        if input.peek(Token![...]) {
+            input.parse::<Token![...]>()?;
 
             let binders = sexpr.binders();
             Ok(SExpr::Many(Box::new(sexpr), binders))
-        } else if lookahead.peek(DotDotPlus) {
-            input.parse::<DotDotPlus>();
+        } else if input.peek(DotDotPlus) {
+            input.parse::<DotDotPlus>()?;
             let binders = sexpr.binders();
             Ok(SExpr::ManyOne(Box::new(sexpr), binders))
         } else {
@@ -349,8 +348,65 @@ impl Parse for SExpr {
     }
 }
 
+fn parse_paren(input: &syn::parse::ParseBuffer<'_>) -> syn::Result<SExpr> {
+    if input.is_empty() {
+        Ok(SExpr::Empty)
+    } else {
+        let current = input
+            .parse::<SExpr>()
+            .map_err(|_| input.error("unterminated sexpr pair"))?;
+        let mut current_binders = current.binders();
+        if input.peek(Token![.]) {
+            input.parse::<Token![.]>()?;
+            let end = input.parse::<SExpr>().map_err(|_| {
+                input.error("expected expression after improper list dots".to_string())
+            })?;
+            if input.is_empty() {
+                check_duplicates(input, &mut current_binders, &end)?;
+                Ok(SExpr::Pair {
+                    car: Box::new(current),
+                    cdr: Box::new(end),
+                    binders: current_binders,
+                })
+            } else {
+                Err(input.error("expected nothing after last expression in improper list"))
+            }
+        } else {
+            let next = parse_paren(input)?;
+            check_duplicates(input, &mut current_binders, &next)?;
+
+            Ok(SExpr::Pair {
+                car: Box::new(current),
+                cdr: Box::new(next),
+                binders: current_binders,
+            })
+        }
+    }
+}
+
+fn check_duplicates(
+    input: &syn::parse::ParseBuffer<'_>,
+    current_binders: &mut MatchStruct,
+    next: &SExpr,
+) -> Result<(), syn::Error> {
+    next.binders().binders.into_iter().try_for_each(|binder| {
+        let message = format!("duplicate binder {binder}");
+        if !current_binders.binders.insert(binder) {
+            Err(input.error(message))
+        } else {
+            Ok(())
+        }
+    })
+}
+
 #[proc_macro]
 pub fn match_syntax(input: TokenStream) -> TokenStream {
-    let input_ = parse_macro_input!(input as SExpr);
-    return TokenStream::new();
+    let input = parse_macro_input!(input as SExpr);
+    let binders = input.binders().binders.into_iter();
+    quote! {
+        struct Matcher {
+            #(  #binders: Ast, )*
+        }
+    }
+    .into()
 }
