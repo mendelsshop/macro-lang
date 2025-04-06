@@ -1,8 +1,9 @@
-use std::{collections::HashSet, process::id};
+use std::collections::HashSet;
 
 use crate::custom::DotDotPlus;
+use custom::id;
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{ToTokens, TokenStreamExt, quote};
 use syn::{Ident, Token, ext::IdentExt, parenthesized, parse::Parse, parse_macro_input};
 // original attempt at macro using MBE just here to look at to adpat
 //macro_rules! match_syntax {
@@ -286,9 +287,10 @@ struct MatchStruct {
     binders: HashSet<Ident>,
 }
 mod custom {
-    use syn::custom_punctuation;
+    use syn::{custom_keyword, custom_punctuation};
 
     custom_punctuation!(DotDotPlus, ..+);
+    custom_keyword!(id);
 }
 #[derive(Debug)]
 enum SExpr {
@@ -330,7 +332,15 @@ impl Parse for SExpr {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let sexpr = if input.peek(Ident::peek_any) {
             let ident = Ident::parse_any(input)?;
-            if ident.to_string() == "id" || ident.to_string().ends_with(":id") {
+            if input.peek(Token![:]) {
+                input.parse::<Token![:]>()?;
+                if input.peek(id) {
+                    input.parse::<id>()?;
+                    Self::Identifier(ident)
+                } else {
+                    return Err(input.error("unkown syntax expected `id` after `:`"));
+                }
+            } else if ident.to_string() == "id" {
                 Self::Identifier(ident)
             } else {
                 Self::Symbol(ident)
@@ -406,17 +416,76 @@ fn check_duplicates(
     })
 }
 
+impl ToTokens for SExpr {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            SExpr::Many(sexpr, match_struct) => todo!(),
+            SExpr::ManyOne(sexpr, match_struct) => todo!(),
+            SExpr::Symbol(ident) => {
+                let token = quote! {
+                    this.#ident = s;
+                };
+                tokens.append_all(token.into_iter());
+            }
+            SExpr::Identifier(ident) => {
+                let token = quote! {
+                    if !s.identifier() {
+                       return Err(format!("not an identifier {s}"))
+                    }
+                    this.#ident = s;
+                };
+                tokens.append_all(token.into_iter());
+            }
+            SExpr::Empty => {
+                let token = quote! {
+                    if s != ast::Ast::TheEmptyList {
+                       return Err(format!("bad syntax expected expected null {s}"))
+                    }
+                };
+                tokens.append_all(token.into_iter());
+            }
+            SExpr::Pair {
+                car,
+                cdr,
+                binders: _,
+            } => {
+                let token = quote! {
+                   if let ast::Ast::Pair(p) = s {
+                        let ast::Pair(car, cdr) = *p;
+                        {
+                            let s = car;
+                            #car
+                        }
+                        {
+
+                            let s = cdr;
+                            #cdr
+                        }
+                    } else {
+                       return Err(format!("not a pair {s}"))
+                    }
+                };
+                tokens.append_all(token.into_iter());
+            }
+        }
+    }
+}
 #[proc_macro]
 pub fn match_syntax(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as SExpr);
     let binders = input.binders().binders.into_iter();
+    let binders1 = input.binders().binders.into_iter();
     quote! {
         struct Matcher {
             #(  #binders: Ast, )*
         }
         impl Matcher {
             fn matches(s: Ast) -> Result<Self, String> {
-                todo!()
+                let mut this = Self {
+                    #(  #binders1: Ast::TheEmptyList, )*
+                };
+                #input
+                return Ok(this);
             }
         }
     }
