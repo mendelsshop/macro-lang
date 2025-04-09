@@ -419,8 +419,43 @@ fn check_duplicates(
 impl ToTokens for SExpr {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
-            SExpr::Many(sexpr, match_struct) => todo!(),
-            SExpr::ManyOne(sexpr, match_struct) => todo!(),
+            SExpr::Many(sexpr, match_struct) => {
+                let binders = match_struct.binders.clone().into_iter();
+                let binders1 = match_struct.binders.clone().into_iter();
+                let token = quote! {
+                    let res = s.fold_to_syntax_list::<Self, String>(
+                        &mut |s, mut current| {
+                            let mut this = Self::default();
+                            #sexpr;
+                            #(  current.#binders = crate::ast::Ast::Pair(Box::new(Pair(this.#binders, current.#binders))); )*
+                            return Ok(current)
+                        },
+                        Self::default()
+                    )?;
+
+                    #(  this.#binders1 = res.#binders1; )*
+                };
+                tokens.append_all(token.into_iter());
+            }
+            SExpr::ManyOne(sexpr, match_struct) => {
+                // TODO: make sure at least one
+                let binders = match_struct.binders.clone().into_iter();
+                let binders1 = match_struct.binders.clone().into_iter();
+                let token = quote! {
+                    let res = s.fold_to_syntax_list::<Self, String>(
+                        &mut |s, mut current| {
+                            let mut this = Self::default();
+                            #sexpr;
+                            #(  current.#binders = crate::ast::Ast::Pair(Box::new(Pair(this.#binders, current.#binders))); )*
+                            return Ok(current)
+                        },
+                        Self::default()
+                    )?;
+
+                    #(  this.#binders1 = res.#binders1; )*
+                };
+                tokens.append_all(token.into_iter());
+            }
             SExpr::Symbol(ident) => {
                 let token = quote! {
                     this.#ident = s;
@@ -438,7 +473,7 @@ impl ToTokens for SExpr {
             }
             SExpr::Empty => {
                 let token = quote! {
-                    if s != ast::Ast::TheEmptyList {
+                    if s != crate::ast::Ast::TheEmptyList {
                        return Err(format!("bad syntax expected expected null {s}"))
                     }
                 };
@@ -450,8 +485,8 @@ impl ToTokens for SExpr {
                 binders: _,
             } => {
                 let token = quote! {
-                   if let ast::Ast::Pair(p) = s {
-                        let ast::Pair(car, cdr) = *p;
+                   if let crate::ast::Ast::Pair(p) = s {
+                        let crate::ast::Pair(car, cdr) = *p;
                         {
                             let s = car;
                             #car
@@ -477,13 +512,18 @@ pub fn match_syntax(input: TokenStream) -> TokenStream {
     let binders1 = input.binders().binders.into_iter();
     quote! {
         struct Matcher {
-            #(  #binders: Ast, )*
+            #(  #binders: crate::ast::Ast, )*
+        }
+        impl Default for Matcher {
+            fn default() -> Self {
+                 Self {
+                    #(  #binders1: crate::ast::Ast::TheEmptyList, )*
+                }
+            }
         }
         impl Matcher {
             fn matches(s: Ast) -> Result<Self, String> {
-                let mut this = Self {
-                    #(  #binders1: Ast::TheEmptyList, )*
-                };
+                let mut this = Self::default();
                 #input
                 return Ok(this);
             }

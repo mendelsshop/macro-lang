@@ -185,6 +185,22 @@ impl Ast {
             _ => self,
         }
     }
+
+    pub fn fold_to_syntax_list<T, E>(
+        self,
+        mut f: &mut impl FnMut(Self, T) -> Result<T, E>,
+        init: T,
+    ) -> Result<T, E> {
+        match self {
+            Self::Pair(l) => {
+                let Pair(car, cdr) = *l;
+                cdr.fold_to_syntax_list(&mut f, init)
+                    .and_then(|init| f(car, init))
+            }
+            Self::Syntax(s) => s.0.fold_to_syntax_list(f, init),
+            _ => Ok(init),
+        }
+    }
     pub fn map_to_syntax_list<E>(
         self,
         mut f: impl FnMut(Self) -> Result<Ast, E>,
