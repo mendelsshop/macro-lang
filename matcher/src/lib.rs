@@ -428,7 +428,7 @@ impl ToTokens for SExpr {
                             let mut this = Self::default();
                             #sexpr;
                             #(  current.#binders = crate::ast::Ast::Pair(Box::new(Pair(this.#binders, current.#binders))); )*
-                            return Ok(current)
+                             Ok(current)
                         },
                         Self::default()
                     )?;
@@ -439,20 +439,27 @@ impl ToTokens for SExpr {
             }
             SExpr::ManyOne(sexpr, match_struct) => {
                 // TODO: make sure at least one
+                let sexpr_string = format!("{sexpr:?}");
                 let binders = match_struct.binders.clone().into_iter();
                 let binders1 = match_struct.binders.clone().into_iter();
                 let token = quote! {
-                    let res = s.fold_to_syntax_list::<Self, String>(
-                        &mut |s, mut current| {
+                    let sexpr = #sexpr_string;
+                    let error = format!("expected at least one of {sexpr:?} {s}");
+                    let res = s.fold_to_syntax_list::<(usize, Self), String>(
+                        &mut |s, (i, mut current)| {
+                            let next_i = if s == crate::ast::Ast::TheEmptyList { 0 } else  {1  } + i;
                             let mut this = Self::default();
                             #sexpr;
                             #(  current.#binders = crate::ast::Ast::Pair(Box::new(Pair(this.#binders, current.#binders))); )*
-                            return Ok(current)
+                             Ok((next_i, current))
                         },
-                        Self::default()
+                        (0, Self::default())
                     )?;
 
-                    #(  this.#binders1 = res.#binders1; )*
+                    if res.0 == 0 {
+                        return Err(error)
+                    }
+                    #(  this.#binders1 = res.1.#binders1; )*
                 };
                 tokens.append_all(token.into_iter());
             }
@@ -525,7 +532,7 @@ pub fn match_syntax(input: TokenStream) -> TokenStream {
             fn matches(s: Ast) -> Result<Self, String> {
                 let mut this = Self::default();
                 #input
-                return Ok(this);
+                Ok(this)
             }
         }
     }
