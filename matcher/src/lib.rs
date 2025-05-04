@@ -4,7 +4,10 @@ use crate::custom::DotDotPlus;
 use custom::id;
 use proc_macro::TokenStream;
 use quote::{ToTokens, TokenStreamExt, quote};
-use syn::{Ident, Token, ext::IdentExt, parenthesized, parse::Parse, parse_macro_input};
+use rand::random;
+use syn::{
+    Ident, Token, ext::IdentExt, parenthesized, parse::Parse, parse_macro_input, spanned::Spanned,
+};
 // original attempt at macro using MBE just here to look at to adpat
 //macro_rules! match_syntax {
 //   (@matcher($this:expr, $original:expr, $syntax:expr, $type:ty) $symbol:ident:id ...+) => {
@@ -517,23 +520,28 @@ pub fn match_syntax(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as SExpr);
     let binders = input.binders().binders.into_iter();
     let binders1 = input.binders().binders.into_iter();
+    let name = syn::Ident::new(&format!("Matcher{}", random::<u64>()), input.span());
     quote! {
-        struct Matcher {
+        {
+        struct #name {
             #(  #binders: crate::ast::Ast, )*
         }
-        impl Default for Matcher {
+        impl Default for #name {
             fn default() -> Self {
                  Self {
                     #(  #binders1: crate::ast::Ast::TheEmptyList, )*
                 }
             }
         }
-        impl Matcher {
+        impl #name {
             fn matches(s: Ast) -> Result<Self, String> {
                 let mut this = Self::default();
                 #input
                 Ok(this)
             }
+        }
+        // TODO: somehow just return the type (#name), but doesn't seem to be usable in a type context
+        (#name::matches)
         }
     }
     .into()
