@@ -1,11 +1,10 @@
 use std::{collections::HashMap, rc::Rc};
 
-use crate::{
-    ast::{
-        syntax::{Properties, SourceLocation, Syntax},
-        Ast, Symbol,
-    },
-    sexpr,
+use matcher::match_syntax;
+
+use crate::ast::{
+    syntax::{Properties, SourceLocation, Syntax},
+    Ast, Symbol,
 };
 
 use super::{
@@ -13,7 +12,6 @@ use super::{
     module_path::ResolvedModulePath,
     namespace::{Module, NameSpace},
     phase::Phase,
-    r#match::try_match_syntax,
     Expander,
 };
 
@@ -112,9 +110,10 @@ impl Expander {
     }
 
     pub fn core_form_symbol(s: Ast, phase: Phase) -> Result<Symbol, String> {
-        try_match_syntax(s, sexpr!((id . "_"))).and_then(|f| {
+        // TODO:  match_syntax!((id . _))
+        match_syntax!((id._id))(s).and_then(|f| {
             // could this also be a plain symbol?
-            let sym: Syntax<Symbol> = f("id".into()).ok_or("internal error")?.try_into()?;
+            let sym: Syntax<Symbol> = f.id.try_into()?;
             let b = Self::resolve(&sym, phase, false).inspect_err(|e| {
                 dbg!(format!("{e}"));
             })?;

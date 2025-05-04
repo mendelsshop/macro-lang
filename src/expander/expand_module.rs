@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, rc::Rc};
 
 use itertools::Either;
+use matcher::match_syntax_as;
 
 use crate::{
     ast::{
@@ -12,7 +13,6 @@ use crate::{
         expand::rebuild,
         expand_requires::perform_initial_require,
         module_path::{build_module_name, ModulePath, SubModulePathElement},
-        r#match::match_syntax,
         require_and_provide::RequiresAndProvides,
     },
     sexpr, UniqueNumberManager,
@@ -25,7 +25,9 @@ use super::{
     phase::Phase,
     Expander,
 };
-
+// TODO: match_syntax!( (#%module_begin body ...))
+match_syntax_as!(ModuleBeginMatcher as (module_begin body ...));
+match_syntax_as!(ModuleMatcher as (module module_name:id initial_require body ...));
 impl Expander {
     pub fn core_form_module(&mut self, syntax: Ast, context: ExpandContext) -> Result<Ast, String> {
         if context.context != Context::TopLevel {
@@ -72,13 +74,8 @@ impl Expander {
         enclosing_self: Option<ResolvedModulePath>,
         keep_enclosing_scope_at_phase: Phase,
     ) -> Result<Ast, String> {
-        let m = match_syntax(
-            syntax.clone(),
-            sexpr!((module "id:module-name" "initial-require" body "...")),
-        )?;
-        let initial_require = m("initial-require".into())
-            .ok_or("internal error")?
-            .syntax_to_datum();
+        let m = ModuleMatcher::matches(syntax.clone())?;
+        let initial_require = m.initial_require.clone().syntax_to_datum();
         let for_submodule = enclosing_self.is_some();
         let keep_enclosing_scope_at_phase_or_initial_require = (keep_enclosing_scope_at_phase
             != Phase::Label)
@@ -88,10 +85,7 @@ impl Expander {
                     .ok()
                     .map(Either::Right)
             })
-            .ok_or(format!(
-                "no a module path: {}",
-                m("initial-require".into()).ok_or("internal error")?
-            ))?;
+            .ok_or(format!("no a module path: {}", m.initial_require))?;
         let outside_scope = UniqueNumberManager::new_scope();
         let inside_scope = UniqueNumberManager::new_scope();
         let new_module_scopes = {
@@ -101,7 +95,7 @@ impl Expander {
             }
             scopes
         };
-        let value = m("id:module-name".into()).ok_or("internal error")?;
+        let value = m.module_name_id.clone();
         let original = format!("{value}");
         let self_path = build_module_name(
             &SubModulePathElement::from(Syntax::<Symbol>::try_from(value)?.0),
@@ -117,9 +111,7 @@ impl Expander {
             context.clone(),
             keep_enclosing_scope_at_phase != Phase::Label,
         );
-        let bodies = m("body".into())
-            .ok_or("internal error")?
-            .map(|b| Ok(apply_module_scopes(b)))?;
+        let bodies = m.body.map(|b| Ok(apply_module_scopes(b)))?;
         let require_and_provides = RequiresAndProvides::default();
         match keep_enclosing_scope_at_phase_or_initial_require {
             Either::Left(phase) => {
@@ -130,7 +122,7 @@ impl Expander {
             Either::Right(initial_require) => perform_initial_require(
                 initial_require,
                 Some(self_path.clone()),
-                &m("initial-require".into()).ok_or("internal error")?,
+                &m.initial_require,
                 module_namespace.clone(),
                 &require_and_provides.clone(),
             )?,
@@ -157,11 +149,10 @@ impl Expander {
                     let self_path = self_path.clone();
                     let m = m.clone();
                     let enclosing_self = enclosing_self.clone();
-                    let module_begin_m =
-                        match_syntax(module_begin.clone(), sexpr!(("#%module-begin" body "...")))?;
+                    let module_begin_m = ModuleBeginMatcher::matches(module_begin.clone())?;
                     require_and_provides.reset_provides();
-                    let bodies = module_begin_m("body".into())
-                        .ok_or("internal error")?
+                    let bodies = module_begin_m
+                        .body
                         .map(|b| Ok(b.add_scope(inside_scope.clone())))?;
                     let expression_expanded_bodys = pass_1_and_2_loop(
                         bodies,
@@ -212,7 +203,7 @@ impl Expander {
                     )?;
                     Ok(rebuild(
                         module_begin,
-                        sexpr!((#(module_begin_m("#%module-begin".into()).ok_or("internal error")?) . #(fully_expanded_bodys))),
+                        sexpr!((#(module_begin_m.module_begin) . #(fully_expanded_bodys))),
                     ))
                 },
             )
@@ -237,7 +228,8 @@ impl Expander {
             },
         )?;
 
-        let rator = sexpr!((#(m("module".into()) .ok_or("internal error")?) #( m("id:module-name".into()) .ok_or("internal error")?)#( m("initial-rquire".into()) .ok_or("internal error")?) #(expanded_module_body)));
+        let rator =
+            sexpr!((#(m.module) #( m.module_name_id)#( m.initial_require) #(expanded_module_body)));
         Ok(require_and_provides
             .attach_require_provide_properties(rebuild(syntax, rator), self_path))
     }
@@ -255,8 +247,8 @@ fn expand_post_submodules(
 
 fn declare_module_for_expansion(
     fully_expanded_bodys_except_post_submodules: Ast,
-    m: impl Fn(Symbol) -> Option<Ast>,
-    module_begin_m: impl Fn(Symbol) -> Option<Ast>,
+    m: ModuleMatcher,
+    module_begin_m: ModuleBeginMatcher,
     require_and_provides: RequiresAndProvides,
     module_namespace: NameSpace,
     self_path: ResolvedModulePath,

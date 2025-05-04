@@ -21,6 +21,7 @@ macro_rules! make_let_values_form {
     ($id:ident, $syntaxes:literal, $rec:literal) => {
         fn $id(&mut self, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
             let variable = Ast::Symbol(self.variable.clone());
+        //TODO: compile time matcher for this would have 2 different types
             let m = if $syntaxes {
                 match_syntax(
                     s.clone(),

@@ -19,6 +19,15 @@ mod custom {
     custom_punctuation!(DotDotPlus, ..+);
     custom_keyword!(id);
 }
+struct NameAsSExpr(Ident, SExpr);
+impl Parse for NameAsSExpr {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let ident = Ident::parse_any(input)?;
+        input.parse::<Token![as]>()?;
+        let sexpr = input.parse()?;
+        Ok(NameAsSExpr(ident, sexpr))
+    }
+}
 #[derive(Debug)]
 enum SExpr {
     Many(Box<Self>, MatchStruct),
@@ -68,7 +77,7 @@ impl Parse for SExpr {
                 } else {
                     return Err(input.error("unkown syntax expected `id` after `:`"));
                 }
-            } else if ident.to_string() == "id" {
+            } else if ident == "id" {
                 Self::Identifier(ident)
             } else {
                 Self::Symbol(ident)
@@ -163,7 +172,7 @@ impl ToTokens for SExpr {
 
                     #(  this.#binders1 = res.#binders1; )*
                 };
-                tokens.append_all(token.into_iter());
+                tokens.append_all(token);
             }
             SExpr::ManyOne(sexpr, match_struct) => {
                 // TODO: make sure at least one
@@ -189,13 +198,13 @@ impl ToTokens for SExpr {
                     }
                     #(  this.#binders1 = res.1.#binders1; )*
                 };
-                tokens.append_all(token.into_iter());
+                tokens.append_all(token);
             }
             SExpr::Symbol(ident) => {
                 let token = quote! {
                     this.#ident = s;
                 };
-                tokens.append_all(token.into_iter());
+                tokens.append_all(token);
             }
             SExpr::Identifier(ident) => {
                 let token = quote! {
@@ -204,7 +213,7 @@ impl ToTokens for SExpr {
                     }
                     this.#ident = s;
                 };
-                tokens.append_all(token.into_iter());
+                tokens.append_all(token);
             }
             SExpr::Empty => {
                 let token = quote! {
@@ -212,7 +221,7 @@ impl ToTokens for SExpr {
                        return Err(format!("bad syntax expected expected null {s}"))
                     }
                 };
-                tokens.append_all(token.into_iter());
+                tokens.append_all(token);
             }
             SExpr::Pair {
                 car,
@@ -235,10 +244,42 @@ impl ToTokens for SExpr {
                        return Err(format!("not a pair {s}"))
                     }
                 };
-                tokens.append_all(token.into_iter());
+                tokens.append_all(token);
             }
         }
     }
+}
+#[proc_macro]
+pub fn match_syntax_as(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as NameAsSExpr);
+    let name = input.0;
+    let input = input.1;
+    let binders = input.binders().binders.into_iter();
+    let binders1 = input.binders().binders.into_iter();
+    quote! {
+        
+        #[derive(Clone)]
+        struct #name {
+            #(  #binders: crate::ast::Ast, )*
+        }
+        impl Default for #name {
+            fn default() -> Self {
+                 Self {
+                    #(  #binders1: crate::ast::Ast::TheEmptyList, )*
+                }
+            }
+        }
+        impl #name {
+            fn matches(s: Ast) -> Result<Self, String> {
+                let mut this = Self::default();
+                #input
+                Ok(this)
+            }
+        }
+        // TODO: somehow just return the type (#name), but doesn't seem to be usable in a type context
+        
+    }
+    .into()
 }
 #[proc_macro]
 pub fn match_syntax(input: TokenStream) -> TokenStream {
@@ -248,6 +289,7 @@ pub fn match_syntax(input: TokenStream) -> TokenStream {
     let name = syn::Ident::new(&format!("Matcher{}", random::<u64>()), input.span());
     quote! {
         {
+        #[derive(Clone)]
         struct #name {
             #(  #binders: crate::ast::Ast, )*
         }

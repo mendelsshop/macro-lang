@@ -227,7 +227,7 @@ pub fn parse_and_perform_requires(
                 }
                 Some(fm) if fm.0 == "prefix".into() => {
                     check_nested(Layer::Phaseless)?;
-                    let m = match_syntax!( (prefix prefix:id spec ))(req.clone(),)?;
+                    let m = match_syntax!( (prefix prefix:id spec ))(req.clone())?;
                     let spec = sexpr!((#(m.spec)));
                     parse_and_perform_requires_loop(
                         spec,
@@ -235,9 +235,7 @@ pub fn parse_and_perform_requires(
                         phase_shift,
                         just_meta,
                         Some(Adjust::Prefix {
-                            symbol: identifier_symbol(
-                                m.prefix_id,
-                            )?,
+                            symbol: identifier_symbol(m.prefix_id)?,
                         }),
                         Layer::Path,
                         this.clone(),
@@ -278,12 +276,8 @@ pub fn parse_and_perform_requires(
                         phase_shift,
                         just_meta,
                         Some(Adjust::AllExcept {
-                            prefix_symbol: identifier_symbol(
-                                m.prefix_id,
-                            )?,
-                            symbols: identifiers_to_symbol_set(
-                                m.id,
-                            )?,
+                            prefix_symbol: identifier_symbol(m.prefix_id)?,
+                            symbols: identifiers_to_symbol_set(m.id)?,
                         }),
                         Layer::Path,
                         this.clone(),

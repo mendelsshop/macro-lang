@@ -7,6 +7,7 @@ use std::{
 };
 
 use itertools::Itertools;
+use matcher::match_syntax;
 
 use crate::{
     ast::{
@@ -24,7 +25,6 @@ use super::{
     expand_context::ExpandContext,
     namespace::NameSpace,
     phase::Phase,
-    r#match::match_syntax,
     Expander,
 };
 
@@ -189,11 +189,10 @@ impl Expander {
                 if let Ok(pat) = Self::core_form_symbol(exp_body.clone(), phase) {
                     match pat.0.to_string().as_str() {
                         "begin" => {
-                            let m = match_syntax(
-                                exp_body,
-                                list!("begin".into(), "e".into(), "...".into()),
-                            )?;
-                            let e = m("e".into()).ok_or("internal error")?;
+                            let m = match_syntax!(
+                                (begin e ...)
+                            )(exp_body)?;
+                            let e = m.e;
                             let mut new_bodys = VecDeque::from(e.to_list_checked()?);
 
                             new_bodys.append(&mut bodys);
@@ -208,18 +207,14 @@ impl Expander {
                             )
                         }
                         "define-values" => {
-                            let m = match_syntax(
-                                exp_body.clone(),
-                                list!(
-                                    "define-values".into(),
-                                    list!("id".into(), "...".into()),
-                                    "rhs".into()
-                                ),
-                            )?;
-                            let ids = self.remove_use_site_scopes(
-                                m("id".into()).ok_or("internal error")?,
-                                &body_ctx,
-                            );
+                            let m = match_syntax!(
+                                (
+                                    define_values
+                                    (id ...)
+                                    rhs
+                                )
+                            )(exp_body.clone())?;
+                            let ids = self.remove_use_site_scopes(m.id, &body_ctx);
                             let ids = to_id_list(ids)?;
                             let new_duplicates =
                                 check_no_duplicate_ids(ids.clone(), phase, &exp_body, duplicate)?;
@@ -235,7 +230,7 @@ impl Expander {
                             );
 
                             val_binds.append(&mut self.no_binds(done_bodys, phase));
-                            val_binds.push((ids, m("rhs".into()).ok_or("internal error")?));
+                            val_binds.push((ids, m.rhs));
                             self.expand_body_loop(
                                 body_ctx,
                                 ctx,
@@ -247,18 +242,12 @@ impl Expander {
                             )
                         }
                         "define-syntaxes" => {
-                            let m = match_syntax(
-                                exp_body.clone(),
-                                list!(
-                                    "define-syntaxes".into(),
-                                    list!("id".into(), "...".into()),
-                                    "rhs".into()
-                                ),
-                            )?;
-                            let ids = self.remove_use_site_scopes(
-                                m("id".into()).ok_or("internal error")?,
-                                &body_ctx,
-                            );
+                            let m = match_syntax!((
+                                define_syntaxes
+                                (id ...)
+                                rhs
+                            ))(exp_body.clone())?;
+                            let ids = self.remove_use_site_scopes(m.id, &body_ctx);
                             let ids = ids.to_list_checked()?;
 
                             let id_count = ids.len();
@@ -272,11 +261,8 @@ impl Expander {
                                 .into_iter()
                                 .map(|id| Self::add_local_binding(id, phase))
                                 .collect_vec();
-                            let vals = self.eval_for_syntaxes_binding(
-                                m("rhs".into()).ok_or("internal error")?,
-                                id_count,
-                                ctx.clone(),
-                            )?;
+                            let vals =
+                                self.eval_for_syntaxes_binding(m.rhs, id_count, ctx.clone())?;
                             body_ctx.env.0.extend(keys.into_iter().zip(vals));
                             self.expand_body_loop(
                                 body_ctx,
