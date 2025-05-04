@@ -110,7 +110,7 @@ fn parse_paren(input: &syn::parse::ParseBuffer<'_>) -> syn::Result<SExpr> {
             .parse::<SExpr>()
             .map_err(|_| input.error("unterminated sexpr pair"))?;
         let mut current_binders = current.binders();
-        if input.peek(Token![.]) {
+        if input.peek(Token![.]) && !(input.peek(Token![...]) || input.peek(DotDotPlus)) {
             input.parse::<Token![.]>()?;
             let end = input.parse::<SExpr>().map_err(|_| {
                 input.error("expected expression after improper list dots".to_string())
@@ -257,7 +257,7 @@ pub fn match_syntax_as(input: TokenStream) -> TokenStream {
     let binders = input.binders().binders.into_iter();
     let binders1 = input.binders().binders.into_iter();
     quote! {
-        
+
         #[derive(Clone)]
         struct #name {
             #(  #binders: crate::ast::Ast, )*
@@ -277,7 +277,7 @@ pub fn match_syntax_as(input: TokenStream) -> TokenStream {
             }
         }
         // TODO: somehow just return the type (#name), but doesn't seem to be usable in a type context
-        
+
     }
     .into()
 }

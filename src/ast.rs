@@ -488,3 +488,41 @@ impl TryFrom<Ast> for Symbol {
         Ok(s)
     }
 }
+impl Ast {
+    pub fn to_synax_list(self) -> Self {
+        match self {
+            Self::Pair(l) => Self::Pair(Box::new(Pair(l.0, l.1.to_synax_list()))),
+            Self::Syntax(s) => s.0.to_synax_list(),
+            _ => self,
+        }
+    }
+
+    pub fn fold_to_syntax_list<T, E>(
+        self,
+        mut f: &mut impl FnMut(Self, T) -> Result<T, E>,
+        init: T,
+    ) -> Result<T, E> {
+        match self {
+            Self::Pair(l) => {
+                let Pair(car, cdr) = *l;
+                cdr.fold_to_syntax_list(&mut f, init)
+                    .and_then(|init| f(car, init))
+            }
+            Self::Syntax(s) => s.0.fold_to_syntax_list(f, init),
+            _ => Ok(init),
+        }
+    }
+    pub fn map_to_syntax_list<E>(
+        self,
+        mut f: impl FnMut(Self) -> Result<Ast, E>,
+    ) -> Result<Self, E> {
+        match self {
+            Self::Pair(l) => Ok(Self::Pair(Box::new(Pair(
+                f(l.0)?,
+                l.1.map_to_syntax_list(f)?,
+            )))),
+            Self::Syntax(s) => s.0.map_to_syntax_list(f),
+            _ => Ok(self),
+        }
+    }
+}

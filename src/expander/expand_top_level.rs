@@ -1,7 +1,8 @@
+use matcher::match_syntax;
+
 use crate::{
     ast::{scope::AdjustScope, Ast},
-    expander::r#match::match_syntax,
-    sexpr, UniqueNumberManager,
+    UniqueNumberManager,
 };
 
 use super::{
@@ -33,8 +34,9 @@ impl Expander {
         (ctx.context != Context::TopLevel)
             .then_some(())
             .ok_or(format!("allowed only in module or top level {s}"))
-            .and_then(|_| match_syntax(s.clone(), sexpr!(("#%require" req "..."))))
-            .and_then(|m| m("req".into()).ok_or("internal error".to_string()))
+            // TODO: .and_then(|_| match_syntax!( (#%require req ...))(s.clone()))
+            .and_then(|_| match_syntax!( (require req ...))(s.clone()))
+            .map(|m| m.req)
             .and_then(|reqs| {
                 let sc = UniqueNumberManager::new_scope();
                 reqs.map(|req| Ok(req.add_scope(sc.clone())))

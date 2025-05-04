@@ -26,7 +26,6 @@ mod expand_module;
 mod expand_provide;
 mod expand_requires;
 mod expand_top_level;
-mod r#match;
 pub mod module_path;
 mod namespace;
 pub mod phase;

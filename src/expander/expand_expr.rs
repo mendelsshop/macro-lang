@@ -9,72 +9,90 @@ use crate::{
         duplicate_check::{check_no_duplicate_ids, make_check_no_duplicate_table},
         expand,
     },
-    list, sexpr,
+    list,
 };
 use itertools::Itertools;
 
 use super::{
-    binding::CompileTimeBinding, expand::rebuild, expand_context::ExpandContext,
-    r#match::match_syntax, Expander,
+    binding::CompileTimeBinding, expand::rebuild, expand_context::ExpandContext, Expander,
 };
+matcher::match_syntax_as!(LetSyntaxMatcher as
+
+    (
+        // TODO: letrec_syntaxes+values
+        letrec_syntaxes_and_values
+        (((trans_id ...) trans_rhs) ...)
+        (((val_id ...) val_rhs) ...)
+        body ..+
+    )
+);
+matcher::match_syntax_as!(
+LetMatcher as
+                (
+                    let_values
+                    (((val_id ...) val_rhs) ...)
+                    body
+                    ..+
+                ));
 macro_rules! make_let_values_form {
-    ($id:ident, $syntaxes:literal, $rec:literal) => {
+    (syntax $id:ident,  $rec:literal) => {
+        make_let_values_form!(
+            $id,
+            |s: Ast| LetSyntaxMatcher::matches(s),
+            |m: LetSyntaxMatcher, sc: Scope| itertools::Itertools::try_collect(
+                m.trans_id.to_list_checked()?.into_iter().map(|ids| {
+                    expand::to_id_list(ids).map(|ids| {
+                        ids.into_iter()
+                            .map(|id| id.add_scope(sc.clone()))
+                            .collect_vec()
+                    })
+                }),
+            )?,
+            |m, trans_idss, this, ctx, sc| m
+                .trans_rhs
+                .to_list_checked()?
+                .into_iter()
+                .zip(trans_idss)
+                .map(|(vals, ids)| {
+                    this.eval_for_syntaxes_binding(
+                        vals.add_scope(sc.clone()),
+                        ids.len(),
+                        ctx.clone(),
+                    )
+                })
+                .try_collect()?,
+            |_, this| this.core_datum_to_syntax("letrec-values".into()),
+            $rec
+        );
+    };
+
+    ( $id:ident,  $rec:literal) => {
+        make_let_values_form!(
+            $id,
+            |s: Ast| LetMatcher::matches(s.clone()),
+            |_, _| vec![],
+            |_, _, _, _, _| vec![],
+            |m, _| m.let_values,
+            $rec
+        );
+    };
+    ($id:ident, $m:expr, $trans_idss:expr, $trans_valss:expr, $letrecvalues:expr, $rec:literal) => {
         fn $id(&mut self, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
             let variable = Ast::Symbol(self.variable.clone());
-        //TODO: compile time matcher for this would have 2 different types
-            let m = if $syntaxes {
-                match_syntax(
-                    s.clone(),
-                    sexpr!((
-                        "letrec-syntaxes+values"
-                        ([("trans-id" "...") "trans-rhs"] "...")
-                        ([("val-id" "...") "val-rhs"] "...")
-                        body
-                        "...+"
-                    )),
-                )?
-            } else {
-                match_syntax(
-                    s.clone(),
-                    sexpr!((
-                        "let-values"
-                        ([("val-id" "...") "val-rhs"] "...")
-                        body
-                        "...+"
-                    )),
-                )?
-            };
+            //TODO: compile time matcher for this would have 2 different types
+            let m = ($m)(s)?;
+
             let sc = UniqueNumberManager::new_scope();
-            let trans_idss = if $syntaxes {
-                itertools::Itertools::try_collect(
-                    m("trans-id".into())
-                        .ok_or("internal error")?
-                        .to_list_checked()?
-                        .into_iter()
-                        .map(|ids| {
-                            expand::to_id_list(ids).map(|ids| {
-                                ids.into_iter()
-                                    .map(|id| id.add_scope(sc.clone()))
-                                    .collect_vec()
-                            })
-                        }),
-                )?
-            } else {
-                vec![]
-            };
+            let trans_idss = ($trans_idss)(m, sc);
 
             let val_idss: Vec<_> = itertools::Itertools::try_collect(
-                m("val-id".into())
-                    .ok_or("internal error")?
-                    .to_list_checked()?
-                    .into_iter()
-                    .map(|ids| {
-                        expand::to_id_list(ids).map(|ids| {
-                            ids.into_iter()
-                                .map(|id| id.add_scope(sc.clone()))
-                                .collect_vec()
-                        })
-                    }),
+                m.val_id.to_list_checked()?.into_iter().map(|ids| {
+                    expand::to_id_list(ids).map(|ids| {
+                        ids.into_iter()
+                            .map(|id| id.add_scope(sc.clone()))
+                            .collect_vec()
+                    })
+                }),
             )?;
             check_no_duplicate_ids(
                 trans_idss
@@ -99,32 +117,13 @@ macro_rules! make_let_values_form {
                 .into_iter()
                 .flat_map(|ids| self.add_local_bindings(ids))
                 .collect_vec();
-            let trans_valss = if $syntaxes {
-                m("trans-rhs".into())
-                    .ok_or("internal error")?
-                    .to_list_checked()?
-                    .into_iter()
-                    .zip(trans_idss)
-                    .map(|(vals, ids)| {
-                        self.eval_for_syntaxes_binding(
-                            vals.add_scope(sc.clone()),
-                            ids.len(),
-                            ctx.clone(),
-                        )
-                    })
-                    .try_collect()?
-            } else {
-                vec![]
-            };
+            let trans_valss = ($trans_valss)(m, trans_idss, self, ctx, sc);
+
             rec_ctx
                 .env
                 .0
                 .extend(trans_keyss.into_iter().zip(trans_valss.concat()));
-            let letrec_values_id = if $syntaxes {
-                self.core_datum_to_syntax("letrec-values".into())
-            } else {
-                m("let-values".into()).ok_or("internal eror")?
-            };
+            let letrec_values_id = ($letrecvalues)(m, self);
             let val_idss = list_to_cons(val_idss.into_iter(), |ids| {
                 list_to_cons(ids.into_iter(), |x| {
                     Ast::Syntax(Box::new(x.clone().with(Ast::Symbol(x.0))))
@@ -134,21 +133,17 @@ macro_rules! make_let_values_form {
                 s.clone(),
                 list!(
                     letrec_values_id,
-                    Ast::map2(
-                        val_idss,
-                        m("val-rhs".into()).ok_or("internal error")?,
-                        |ids, rhs| {
-                            Ok(list!(
-                                ids,
-                                if $rec {
-                                    self.expand(rhs.add_scope(sc.clone()), rec_ctx.clone())?
-                                } else {
-                                    self.expand(rhs, ctx.clone())?
-                                }
-                            ))
-                        },
-                    )?,
-                    self.expand_body(m("body".into()).ok_or("internal error")?, sc, s, rec_ctx)?
+                    Ast::map2(val_idss, m.val_rhs, |ids, rhs| {
+                        Ok(list!(
+                            ids,
+                            if $rec {
+                                self.expand(rhs.add_scope(sc.clone()), rec_ctx.clone())?
+                            } else {
+                                self.expand(rhs, ctx.clone())?
+                            }
+                        ))
+                    },)?,
+                    self.expand_body(m.body, sc, s, rec_ctx)?
                 ),
             ))
         }
@@ -218,66 +213,38 @@ impl Expander {
         Ok((formals.add_scope(sc), exp_body))
     }
     fn core_form_lambda(&mut self, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
-        let m = match_syntax(
-            s.clone(),
-            list!(
-                "lambda".into(),
-                "formals".into(),
-                "body".into(),
-                "...+".into()
-            ),
-        )?;
-        let (formals, body) = self.make_lambda_expander(
-            s.clone(),
-            m("formals".into()).ok_or("internal error")?,
-            m("body".into()).ok_or("internal error")?,
-            ctx,
-        )?;
-        Ok(rebuild(
-            s,
-            list!(
-                m("lambda".into()).ok_or("internal error".to_string())?,
-                formals,
+        let m = matcher::match_syntax!(
+            (
+                lambda
+                formal
                 body
-            ),
-        ))
+                ..+
+            )
+        )(s.clone())?;
+        let (formals, body) = self.make_lambda_expander(s.clone(), m.formal, m.body, ctx)?;
+        Ok(rebuild(s, list!(m.lambda, formals, body)))
     }
     fn core_form_case_lambda(&mut self, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
-        let m = match_syntax(
-            s.clone(),
-            list!(
-                "case-lambda".into(),
-                list!("formals".into(), "body".into(), "...+".into()),
-                "...".into()
-            ),
-        )?;
-        let cm = match_syntax(
-            s.clone(),
-            list!("case-lambda".into(), "clause".into(), "...".into()),
-        )?;
-        let iter = m("formals".into())
-            .ok_or("internal error")?
+        let m = matcher::match_syntax!((
+            case_lambda
+            (formals body ..+)
+            ...
+        ))(s.clone())?;
+        let cm = matcher::match_syntax!(
+            (case_lambda clause ...)
+        )(s.clone())?;
+        let iter = m
+            .formals
             .to_list_checked()?
             .into_iter()
-            .zip(
-                m("body".into())
-                    .ok_or("internal error")?
-                    .to_list_checked()?,
-            )
-            .zip(
-                cm("clause".into())
-                    .ok_or("internal error")?
-                    .to_list_checked()?,
-            )
+            .zip(m.body.to_list_checked()?)
+            .zip(cm.clause.to_list_checked()?)
             .try_rfold(Ast::TheEmptyList, |rest, ((formals, bodys), clause)| {
                 let (formals, body) =
                     self.make_lambda_expander(s.clone(), formals, bodys, ctx.clone())?;
                 Ok::<Ast, String>(list!(rebuild(clause, list!(formals, body));rest))
             })?;
-        Ok(rebuild(
-            s,
-            list!(m("case-lambda".into()).ok_or("internal error")?; iter),
-        ))
+        Ok(rebuild(s, list!(m.case_lambda; iter)))
     }
     fn parse_and_flatten_formals(
         &self,
@@ -320,13 +287,14 @@ impl Expander {
         parse_and_flatten_formals_loop(formals.clone(), formals, sc, &mut formal_list)
             .map(|()| formal_list)
     }
-    make_let_values_form!(core_form_let_values, false, false);
-    make_let_values_form!(core_form_letrec_values, true, false);
-    make_let_values_form!(core_form_letrec_syntaxes_and_values, true, true);
+    make_let_values_form!(core_form_let_values, false);
+    make_let_values_form!(core_form_letrec_values, true);
+    make_let_values_form!(syntax core_form_letrec_syntaxes_and_values, true);
 
     fn core_form_datum(&mut self, s: Ast, _ctx: ExpandContext) -> Result<Ast, String> {
-        let m = match_syntax(s.clone(), list!("#%datum".into();  "datum".into()))?;
-        let datum = m("datum".into()).ok_or("internal error")?;
+        // TODO: let m = matcher::match_syntax!((#%datum  datum))(s.clone())?;
+        let m = matcher::match_syntax!((_datum  datum))(s.clone())?;
+        let datum = m.datum;
         if matches!(datum, Ast::Syntax(ref s) if s.0.is_keyword()) {
             return Err(format!("keyword misused as an expression: {datum}"));
         }
@@ -336,49 +304,44 @@ impl Expander {
         ))
     }
     fn core_form_app(&mut self, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
-        let m = match_syntax(
-            s.clone(),
+        let m = matcher::match_syntax!(
             //TODO: should app be a syntax object
-            list!("#%app".into(), "rator".into(), "rand".into(), "...".into()),
-        )?;
-        let rator = self.expand(
-            m("rator".into()).ok_or("internal error".to_string())?,
-            ctx.clone(),
-        )?;
-        let rand = m("rand".into())
-            .ok_or("internal error".to_string())?
-            .map(|rand| self.expand(rand, ctx.clone()))?;
+            // TODO: (%app rator rand ...)
+            (app rator rand ...)
+        )(s.clone())?;
+        let rator = self.expand(m.rator, ctx.clone())?;
+        let rand = self.expand(m.rand, ctx)?;
         Ok(rebuild(
             s,
             Ast::Pair(Box::new(Pair(
-                m("#%app".into()).ok_or("internal error")?,
+                m.app,
                 Ast::Pair(Box::new(Pair(rator, rand))),
             ))),
         ))
     }
     fn core_form_quote(&mut self, s: Ast, _ctx: ExpandContext) -> Result<Ast, String> {
-        match_syntax(s.clone(), list!("quote".into(), "datum".into())).map(|_| s)
+        matcher::match_syntax!( (quote datum))(s.clone()).map(|_| s)
     }
     fn core_form_quote_syntax(&mut self, s: Ast, _ctx: ExpandContext) -> Result<Ast, String> {
-        match_syntax(s.clone(), list!("quote-syntax".into(), "datum".into())).map(|_| s)
+        matcher::match_syntax!( (quote_syntax datum))(s.clone()).map(|_| s)
     }
     fn core_form_if(&mut self, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
-        let m = match_syntax(
-            s.clone(),
-            list!(
-                "if".into(),
-                "condition".into(),
-                "consequent".into(),
-                "alternative".into()
-            ),
-        )?;
+        let m = matcher::match_syntax!(
+
+            (
+                r#if
+                condition
+                consequent
+                alternative
+            )
+        )(s.clone())?;
         Ok(rebuild(
             s,
             list!(
-                m("if".into()).ok_or("internal_error")?,
-                self.expand(m("condition".into()).ok_or("internal_error")?, ctx.clone())?,
-                self.expand(m("consequent".into()).ok_or("internal_error")?, ctx.clone())?,
-                self.expand(m("alternative".into()).ok_or("internal_error")?, ctx)?
+                m.r#if,
+                self.expand(m.condition, ctx.clone())?,
+                self.expand(m.consequent, ctx.clone())?,
+                self.expand(m.alternative, ctx)?
             ),
         ))
     }
@@ -387,30 +350,30 @@ impl Expander {
         s: Ast,
         ctx: ExpandContext,
     ) -> Result<Ast, String> {
-        let m = match_syntax(
-            s.clone(),
-            list!(
-                "with-continuation-mark".into(),
-                "key".into(),
-                "val".into(),
-                "body".into()
-            ),
-        )?;
+        let m = matcher::match_syntax!(
+            (
+                with_continuation_mark
+                key
+                val
+                body
+            )
+        )(s.clone())?;
         Ok(rebuild(
             s,
             list!(
-                m("with-continuation-mark".into()).ok_or("internal_error")?,
-                self.expand(m("key".into()).ok_or("internal_error")?, ctx.clone())?,
-                self.expand(m("val".into()).ok_or("internal_error")?, ctx.clone())?,
-                self.expand(m("body".into()).ok_or("internal_error")?, ctx)?
+                m.with_continuation_mark,
+                self.expand(m.key, ctx.clone())?,
+                self.expand(m.val, ctx.clone())?,
+                self.expand(m.body, ctx)?
             ),
         ))
     }
     fn make_begin(&mut self, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
-        let m = match_syntax(s.clone(), list!("begin".into(), "e".into(), "...+".into()))?;
+        let m = matcher::match_syntax!( (begin e ..+))(s.clone())?;
+
         Ok(rebuild(
             s,
-            list!(m("begin".into()).ok_or("internal_error")?; m("e".into()).ok_or("internal_error")?.map(|e|self.expand(e, ctx.clone()))?),
+            list!(m.begin; m.e.map(|e|self.expand(e, ctx.clone()))?),
         ))
     }
     fn core_form_begin(&mut self, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
@@ -420,8 +383,9 @@ impl Expander {
         self.make_begin(s, ctx)
     }
     fn core_form_set(&mut self, s: Ast, ctx: ExpandContext) -> Result<Ast, String> {
-        let m = match_syntax(s.clone(), list!("set!".into(), "id".into(), "rhs".into()))?;
-        let id = m("id".into()).ok_or("internal error")?;
+        // TODO: let m = matcher::match_syntax!( (set! id rhs))(s.clone(),)?;
+        let m = matcher::match_syntax!( (set id rhs))(s.clone())?;
+        let id = m.id;
         let binding = self
             .resolve(&id.clone().try_into()?, false)
             .inspect_err(|e| {
@@ -434,8 +398,8 @@ impl Expander {
         if !matches!(t, CompileTimeBinding::Regular(Ast::Symbol(s)) if s == self.variable) {
             return Err(format!("cannot assign to syntax: {s}"));
         }
-        let set = m("set!".into()).ok_or("internal error")?;
-        let rhs = m("rhs".into()).ok_or("internal error")?;
+        let set = m.set;
+        let rhs = m.rhs;
         Ok(expand::rebuild(s, list!(set, id, rhs)))
     }
 }
