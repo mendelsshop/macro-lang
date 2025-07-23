@@ -155,12 +155,13 @@ impl Expander {
                     let bodies = module_begin_m
                         .body
                         .map(|b| Ok(b.add_scope(inside_scope.clone())))?;
-                    let expression_expanded_bodys = pass_1_and_2_loop(
+                    let expression_expanded_bodys = this.pass_1_and_2_loop(
                         bodies,
                         phase,
                         context.clone(),
                         module_namespace.clone(),
                         new_module_scopes.clone(),
+                        inside_scope,
                         syntax.clone(),
                         self_path.clone(),
                         require_and_provides.clone(),
@@ -256,6 +257,63 @@ impl Expander {
                 .add_scope(inside_scope.clone())
         }
     }
+    fn pass_1_and_2_loop(
+        &mut self,
+        bodies: Ast,
+        phase: Phase,
+        context: ExpandContext,
+        module_namespace: NameSpace,
+        new_module_scopes: BTreeSet<Scope>,
+        inside_scope: Scope,
+        syntax: Ast,
+        self_path: ResolvedModulePath,
+        require_and_provides_clone: RequiresAndProvides,
+    ) -> Result<Ast, String> {
+        let partial_body_ctx = ExpandContext {
+            context: Context::Module,
+            phase,
+            namespace: module_namespace.clone(),
+            only_immediate: true,
+            post_expansion_scope: Some(inside_scope),
+            module_scopes: new_module_scopes,
+            ..context
+        };
+        let partially_expanded_bodys = self.partially_expand_bodys(
+            bodies,
+            syntax,
+            phase,
+            partial_body_ctx.clone(),
+            module_namespace,
+            self_path,
+            require_and_provides_clone,
+        );
+        let body_ctx = ExpandContext {
+            only_immediate: false,
+            post_expansion_scope: None,
+            ..partial_body_ctx
+        };
+        self.finish_expanding_body_expressions(partially_expanded_bodys, phase, body_ctx)
+    }
+    fn partially_expand_bodys(
+        &self,
+        bodies: Ast,
+        s: Ast,
+        phase: Phase,
+        partial_body_ctx: ExpandContext,
+        module_namespace: NameSpace,
+        self_path: ResolvedModulePath,
+        require_and_provides_clone: RequiresAndProvides,
+    ) -> Result<Ast, String> {
+        todo!()
+    }
+    fn finish_expanding_body_expressions(
+        &self,
+        partially_expanded_bodys: Result<Ast, String>,
+        phase: Phase,
+        partial_body_ctx: ExpandContext,
+    ) -> Result<Ast, String> {
+        todo!()
+    }
 }
 
 fn expand_post_submodules(
@@ -287,19 +345,6 @@ fn resolve_provides(
     phase: Phase,
     self_path: ResolvedModulePath,
     context: ExpandContext,
-) -> Result<Ast, String> {
-    todo!()
-}
-
-fn pass_1_and_2_loop(
-    bodies: Ast,
-    phase: Phase,
-    context: ExpandContext,
-    module_namespace: NameSpace,
-    new_module_scopes: BTreeSet<Scope>,
-    syntax: Ast,
-    self_path: ResolvedModulePath,
-    require_and_provides_clone: RequiresAndProvides,
 ) -> Result<Ast, String> {
     todo!()
 }
