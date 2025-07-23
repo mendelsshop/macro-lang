@@ -105,13 +105,14 @@ impl Expander {
         let module_namespace = context
             .namespace
             .make_module_namespace(self_path.clone(), for_submodule);
-        let apply_module_scopes = make_apply_module_scopes(
+        let apply_module_scopes = self.make_apply_module_scopes(
             outside_scope,
             inside_scope.clone(),
             context.clone(),
             keep_enclosing_scope_at_phase != Phase::Label,
         );
         let bodies = m.body.map(|b| Ok(apply_module_scopes(b)))?;
+        drop(apply_module_scopes);
         let require_and_provides = RequiresAndProvides::default();
         match keep_enclosing_scope_at_phase_or_initial_require {
             Either::Left(phase) => {
@@ -233,6 +234,28 @@ impl Expander {
         Ok(require_and_provides
             .attach_require_provide_properties(rebuild(syntax, rator), self_path))
     }
+    fn make_apply_module_scopes(
+        &self,
+        outside_scope: Scope,
+        inside_scope: Scope,
+        context: ExpandContext,
+        keep_enclosing_scope_at_phase: bool,
+    ) -> impl Fn(Ast) -> Ast + use<'_> {
+        move |syntax| {
+            let s_without_enclosing = if keep_enclosing_scope_at_phase {
+                syntax
+            } else {
+                self.remove_use_site_scopes(
+                    syntax.remove_scopes(context.module_scopes.clone()),
+                    &context,
+                )
+            };
+
+            s_without_enclosing
+                .add_scope(outside_scope.clone())
+                .add_scope(inside_scope.clone())
+        }
+    }
 }
 
 fn expand_post_submodules(
@@ -290,13 +313,4 @@ fn ensure_module_begin(
     syntax: Ast,
 ) -> Result<Ast, String> {
     todo!()
-}
-
-fn make_apply_module_scopes(
-    outside_scope: Scope,
-    inside_scope: Scope,
-    context: ExpandContext,
-    keep_enclosing_scope_at_phase: bool,
-) -> impl Fn(Ast) -> Ast {
-    |syntax| todo!()
 }

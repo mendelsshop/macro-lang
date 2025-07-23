@@ -318,7 +318,7 @@ impl Expander {
             Some(self.core_syntax.4.clone()),
         )
     }
-    fn remove_use_site_scopes(&self, syntax: Ast, ctx: &ExpandContext) -> Ast {
+    pub fn remove_use_site_scopes(&self, syntax: Ast, ctx: &ExpandContext) -> Ast {
         if let Some(scopes) = &ctx.use_site_scopes {
             syntax.remove_scopes(scopes.borrow().clone())
         } else {
