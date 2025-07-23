@@ -30,8 +30,8 @@ pub mod expand;
 mod expand_context;
 mod expand_expr;
 mod expand_top_level;
-mod namespace;
 mod module;
+mod namespace;
 pub struct Expander {
     core_forms: HashMap<Rc<str>, CoreForm>,
     core_primitives: HashMap<Rc<str>, Ast>,
