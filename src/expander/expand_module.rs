@@ -1,6 +1,11 @@
-use std::{collections::BTreeSet, rc::Rc};
+use std::{
+    collections::BTreeSet,
+    iter::{self},
+    rc::Rc,
+};
 
-use itertools::Either;
+use fallible_iterator::{self, convert, FallibleIterator};
+use itertools::{Either, Itertools};
 use matcher::match_syntax_as;
 
 use crate::{
@@ -25,6 +30,7 @@ use super::{
     phase::Phase,
     Expander,
 };
+
 // TODO: match_syntax!( (#%module_begin body ...))
 match_syntax_as!(ModuleBeginMatcher as (module_begin body ...));
 match_syntax_as!(ModuleMatcher as (module module_name:id initial_require body ...));
@@ -152,9 +158,15 @@ impl Expander {
                     let enclosing_self = enclosing_self.clone();
                     let module_begin_m = ModuleBeginMatcher::matches(module_begin.clone())?;
                     require_and_provides.reset_provides();
-                    let bodies = module_begin_m
-                        .body
-                        .map(|b| Ok(b.add_scope(inside_scope.clone())))?;
+                    let bodies = {
+                        let inside_scope = inside_scope.clone();
+                        module_begin_m
+                            .body
+                            .clone()
+                            .to_list()
+                            .into_iter()
+                            .map(move |b| (b.add_scope(inside_scope.clone())))
+                    };
                     let expression_expanded_bodys = this.pass_1_and_2_loop(
                         bodies,
                         phase,
@@ -165,7 +177,7 @@ impl Expander {
                         syntax.clone(),
                         self_path.clone(),
                         require_and_provides.clone(),
-                    )?;
+                    );
                     let fully_expanded_bodys_except_post_submodules = resolve_provides(
                         expression_expanded_bodys,
                         syntax.clone(),
@@ -173,7 +185,7 @@ impl Expander {
                         phase,
                         self_path.clone(),
                         context.clone(),
-                    )?;
+                    );
                     let submodule_context = ExpandContext {
                         namespace: module_namespace.clone(),
                         module_scopes: new_module_scopes,
@@ -257,9 +269,9 @@ impl Expander {
                 .add_scope(inside_scope.clone())
         }
     }
-    fn pass_1_and_2_loop(
+    fn pass_1_and_2_loop<'a>(
         &mut self,
-        bodies: Ast,
+        bodies: impl Iterator<Item = Ast> + Clone + 'a,
         phase: Phase,
         context: ExpandContext,
         module_namespace: NameSpace,
@@ -268,7 +280,10 @@ impl Expander {
         syntax: Ast,
         self_path: ResolvedModulePath,
         require_and_provides_clone: RequiresAndProvides,
-    ) -> Result<Ast, String> {
+        // -> impl Iterator<Item = Result<Ast, String>> {
+        // wish i could just do this but require nested impl traits or the like, for contiunation
+        // maybe
+    ) -> impl FallibleIterator<Item = Ast, Error = String> + Clone {
         let partial_body_ctx = ExpandContext {
             context: Context::Module,
             phase,
@@ -278,7 +293,7 @@ impl Expander {
             module_scopes: new_module_scopes,
             ..context
         };
-        let partially_expanded_bodys = self.partially_expand_bodys(
+        let partially_expanded_bodies = self.partially_expand_bodys(
             bodies,
             syntax,
             phase,
@@ -292,32 +307,49 @@ impl Expander {
             post_expansion_scope: None,
             ..partial_body_ctx
         };
-        self.finish_expanding_body_expressions(partially_expanded_bodys, phase, body_ctx)
+        self.finish_expanding_body_expressions(partially_expanded_bodies, phase, body_ctx)
     }
+    // use process_results like iterator but take it in from origianl function so now lifetime
+    // issues, and in order not keep on changing the underlying iterator, backwards implement a
+    // trait made for process results, i.e. if Map struct (how a map is repr in type system)
+    // contains an iterator that implement process_results iterator then implement for Map struct
+    // too, if we want to go crazy have a marker trait, called HasIterator for iterator adapater
+    // structs
     fn partially_expand_bodys(
         &self,
-        bodies: Ast,
+        bodies: impl Iterator<Item = Ast>,
         s: Ast,
         phase: Phase,
         partial_body_ctx: ExpandContext,
         module_namespace: NameSpace,
         self_path: ResolvedModulePath,
         require_and_provides_clone: RequiresAndProvides,
-    ) -> Result<Ast, String> {
-        todo!()
+    ) -> impl FallibleIterator<Item = Ast> {
+        convert(
+            bodies
+                // TODO: maybe make flat_map_ok = map + flatten_ok
+                .map(move |body| {
+                    if let Ok(sym) = Self::core_form_symbol(body, phase) {
+                        Ok((iter::once(Ast::TheEmptyList)))
+                    } else {
+                        Err("to".to_string())
+                    }
+                })
+                .flatten_ok(),
+        )
     }
     fn finish_expanding_body_expressions(
         &self,
-        partially_expanded_bodys: Result<Ast, String>,
+        partially_expanded_bodys: impl FallibleIterator<Item = Ast>,
         phase: Phase,
         partial_body_ctx: ExpandContext,
-    ) -> Result<Ast, String> {
-        todo!()
+    ) -> impl FallibleIterator<Item = Ast, Error = String> + Clone {
+        (fallible_iterator::empty())
     }
 }
 
 fn expand_post_submodules(
-    fully_expanded_bodys_except_post_submodules: Ast,
+    fully_expanded_bodys_except_post_submodules: impl FallibleIterator<Item = Ast> + Clone,
     declare_enclosing_module: impl FnMut() -> Result<Ast, String>,
     syntax: Ast,
     self_path: ResolvedModulePath,
@@ -327,7 +359,7 @@ fn expand_post_submodules(
 }
 
 fn declare_module_for_expansion(
-    fully_expanded_bodys_except_post_submodules: Ast,
+    fully_expanded_bodys_except_post_submodules: impl FallibleIterator<Item = Ast> + Clone,
     m: ModuleMatcher,
     module_begin_m: ModuleBeginMatcher,
     require_and_provides: RequiresAndProvides,
@@ -339,14 +371,14 @@ fn declare_module_for_expansion(
 }
 
 fn resolve_provides(
-    expression_expanded_bodys: Ast,
+    expression_expanded_bodys: impl FallibleIterator<Item = Ast> + Clone,
     syntax: Ast,
     require_and_provides: RequiresAndProvides,
     phase: Phase,
     self_path: ResolvedModulePath,
     context: ExpandContext,
-) -> Result<Ast, String> {
-    todo!()
+) -> impl FallibleIterator<Item = Ast, Error = String> + Clone {
+    (fallible_iterator::empty())
 }
 
 fn ensure_module_begin(
