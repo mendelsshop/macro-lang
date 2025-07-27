@@ -177,7 +177,7 @@ impl Expander {
                         syntax.clone(),
                         self_path.clone(),
                         require_and_provides.clone(),
-                    );
+                    )?;
                     let fully_expanded_bodys_except_post_submodules = resolve_provides(
                         expression_expanded_bodys,
                         syntax.clone(),
@@ -185,7 +185,7 @@ impl Expander {
                         phase,
                         self_path.clone(),
                         context.clone(),
-                    );
+                    )?;
                     let submodule_context = ExpandContext {
                         namespace: module_namespace.clone(),
                         module_scopes: new_module_scopes,
@@ -283,7 +283,7 @@ impl Expander {
         // -> impl Iterator<Item = Result<Ast, String>> {
         // wish i could just do this but require nested impl traits or the like, for contiunation
         // maybe
-    ) -> impl FallibleIterator<Item = Ast, Error = String> + Clone {
+    ) -> Result<Vec<Ast>, String> {
         let partial_body_ctx = ExpandContext {
             context: Context::Module,
             phase,
@@ -301,7 +301,7 @@ impl Expander {
             module_namespace,
             self_path,
             require_and_provides_clone,
-        );
+        )?;
         let body_ctx = ExpandContext {
             only_immediate: false,
             post_expansion_scope: None,
@@ -324,32 +324,31 @@ impl Expander {
         module_namespace: NameSpace,
         self_path: ResolvedModulePath,
         require_and_provides_clone: RequiresAndProvides,
-    ) -> impl FallibleIterator<Item = Ast> {
-        convert(
-            bodies
-                // TODO: maybe make flat_map_ok = map + flatten_ok
-                .map(move |body| {
-                    if let Ok(sym) = Self::core_form_symbol(body, phase) {
-                        Ok((iter::once(Ast::TheEmptyList)))
-                    } else {
-                        Err("to".to_string())
-                    }
-                })
-                .flatten_ok(),
-        )
+    ) -> Result<Vec<Ast>, String> {
+        (bodies
+            // TODO: maybe make flat_map_ok = map + flatten_ok
+            .map(move |body| {
+                if let Ok(sym) = Self::core_form_symbol(body, phase) {
+                    Ok((iter::once(Ast::TheEmptyList)))
+                } else {
+                    Err("to".to_string())
+                }
+            })
+            .flatten_ok()
+            .collect())
     }
     fn finish_expanding_body_expressions(
         &self,
-        partially_expanded_bodys: impl FallibleIterator<Item = Ast>,
+        partially_expanded_bodys: Vec<Ast>,
         phase: Phase,
         partial_body_ctx: ExpandContext,
-    ) -> impl FallibleIterator<Item = Ast, Error = String> + Clone {
-        (fallible_iterator::empty())
+    ) -> Result<Vec<Ast>, String> {
+        Ok(vec![])
     }
 }
 
 fn expand_post_submodules(
-    fully_expanded_bodys_except_post_submodules: impl FallibleIterator<Item = Ast> + Clone,
+    fully_expanded_bodys_except_post_submodules: Vec<Ast>,
     declare_enclosing_module: impl FnMut() -> Result<Ast, String>,
     syntax: Ast,
     self_path: ResolvedModulePath,
@@ -359,7 +358,7 @@ fn expand_post_submodules(
 }
 
 fn declare_module_for_expansion(
-    fully_expanded_bodys_except_post_submodules: impl FallibleIterator<Item = Ast> + Clone,
+    fully_expanded_bodys_except_post_submodules: Vec<Ast>,
     m: ModuleMatcher,
     module_begin_m: ModuleBeginMatcher,
     require_and_provides: RequiresAndProvides,
@@ -371,14 +370,14 @@ fn declare_module_for_expansion(
 }
 
 fn resolve_provides(
-    expression_expanded_bodys: impl FallibleIterator<Item = Ast> + Clone,
+    expression_expanded_bodys: Vec<Ast>,
     syntax: Ast,
     require_and_provides: RequiresAndProvides,
     phase: Phase,
     self_path: ResolvedModulePath,
     context: ExpandContext,
-) -> impl FallibleIterator<Item = Ast, Error = String> + Clone {
-    (fallible_iterator::empty())
+) -> Result<Vec<Ast>, String> {
+    todo!()
 }
 
 fn ensure_module_begin(
