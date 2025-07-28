@@ -6,7 +6,7 @@ use std::{
 
 use fallible_iterator::{self, convert, FallibleIterator};
 use itertools::{Either, Itertools};
-use matcher::match_syntax_as;
+use matcher::{match_syntax, match_syntax_as};
 
 use crate::{
     ast::{
@@ -178,7 +178,7 @@ impl Expander {
                         self_path.clone(),
                         require_and_provides.clone(),
                     )?;
-                    let fully_expanded_bodys_except_post_submodules = resolve_provides(
+                    let fully_expanded_bodys_except_post_submodules = this.resolve_provides(
                         expression_expanded_bodys,
                         syntax.clone(),
                         require_and_provides.clone(),
@@ -208,10 +208,11 @@ impl Expander {
                             )
                         }
                     };
-                    let fully_expanded_bodys = expand_post_submodules(
+                    let fully_expanded_bodys = this.expand_post_submodules(
                         fully_expanded_bodys_except_post_submodules,
                         declare_enclosing_module,
                         syntax,
+                        phase,
                         self_path,
                         submodule_context,
                     )?;
@@ -316,7 +317,7 @@ impl Expander {
     // too, if we want to go crazy have a marker trait, called HasIterator for iterator adapater
     // structs
     fn partially_expand_bodys(
-        &self,
+        &mut self,
         bodies: impl Iterator<Item = Ast>,
         s: Ast,
         phase: Phase,
@@ -325,36 +326,113 @@ impl Expander {
         self_path: ResolvedModulePath,
         require_and_provides_clone: RequiresAndProvides,
     ) -> Result<Vec<Ast>, String> {
-        (bodies
+        bodies
             // TODO: maybe make flat_map_ok = map + flatten_ok
             .map(move |body| {
-                if let Ok(sym) = Self::core_form_symbol(body, phase) {
-                    Ok((iter::once(Ast::TheEmptyList)))
+                let expanded_body = self.expand(body, partial_body_ctx.clone())?;
+                if let Ok(sym) = Self::core_form_symbol(expanded_body.clone(), phase) {
+                    match &*sym.0 {
+                        "begin" => {
+                            let begin_m = match_syntax!((begin e ...))(expanded_body)?;
+                            self.partially_expand_bodys(
+                                begin_m.e.to_list_checked()?.into_iter(),
+                                s.clone(),
+                                phase,
+                                partial_body_ctx.clone(),
+                                module_namespace.clone(),
+                                self_path.clone(),
+                                require_and_provides_clone.clone(),
+                            )
+                        }
+                        "begin-for-syntax" => todo!(),
+                        "define-values" => todo!(),
+                        "define-syntaxes" => todo!(),
+                        "#%require" => todo!(),
+                        "#%provide" => todo!(),
+                        "module" => todo!(),
+                        "module*" => todo!(),
+                        _ => Ok(vec![expanded_body]),
+                    }
                 } else {
-                    Err("to".to_string())
+                    Ok(vec![expanded_body])
                 }
             })
             .flatten_ok()
-            .collect())
+            .collect()
     }
     fn finish_expanding_body_expressions(
-        &self,
+        &mut self,
         partially_expanded_bodys: Vec<Ast>,
         phase: Phase,
         partial_body_ctx: ExpandContext,
     ) -> Result<Vec<Ast>, String> {
-        Ok(vec![])
+        partially_expanded_bodys
+            .into_iter()
+            .map(move |body| {
+                if let Ok(sym) = Self::core_form_symbol(body.clone(), phase) {
+                    match &*sym.0 {
+                        "define-values" => todo!(),
+                        "define-syntaxes" | "#%require" | "#%provide" | "begin-for-syntax"
+                        | "module" | "module*" => todo!(),
+                        _ => Ok(vec![body]),
+                    }
+                } else {
+                    Ok(vec![self.expand(body, partial_body_ctx.clone())?])
+                }
+            })
+            .flatten_ok()
+            .collect()
     }
-}
-
-fn expand_post_submodules(
-    fully_expanded_bodys_except_post_submodules: Vec<Ast>,
-    declare_enclosing_module: impl FnMut() -> Result<Ast, String>,
-    syntax: Ast,
-    self_path: ResolvedModulePath,
-    submodule_context: ExpandContext,
-) -> Result<Ast, String> {
-    todo!()
+    fn resolve_provides(
+        &mut self,
+        expression_expanded_bodys: Vec<Ast>,
+        syntax: Ast,
+        require_and_provides: RequiresAndProvides,
+        phase: Phase,
+        self_path: ResolvedModulePath,
+        context: ExpandContext,
+    ) -> Result<Vec<Ast>, String> {
+        expression_expanded_bodys
+            .into_iter()
+            .map(move |body| {
+                if let Ok(sym) = Self::core_form_symbol(body.clone(), phase) {
+                    match &*sym.0 {
+                        "#%provide" => todo!(),
+                        "begin-for-syntax" => todo!(),
+                        _ => Ok(vec![body]),
+                    }
+                } else {
+                    Ok(vec![body])
+                }
+            })
+            .flatten_ok()
+            .collect()
+    }
+    fn expand_post_submodules(
+        &mut self,
+        fully_expanded_bodys_except_post_submodules: Vec<Ast>,
+        declare_enclosing_module: impl FnMut() -> Result<Ast, String>,
+        syntax: Ast,
+        phase: Phase,
+        self_path: ResolvedModulePath,
+        submodule_context: ExpandContext,
+    ) -> Result<Ast, String> {
+        fully_expanded_bodys_except_post_submodules
+            .into_iter()
+            .map(move |body| {
+                if let Ok(sym) = Self::core_form_symbol(body.clone(), phase) {
+                    match &*sym.0 {
+                        "module*" => todo!(),
+                        "begin-for-syntax" => todo!(),
+                        _ => Ok(vec![body]),
+                    }
+                } else {
+                    Ok(vec![body])
+                }
+            })
+            .flatten_ok()
+            .try_fold(Ast::TheEmptyList, |_, _: Result<Ast, String>| todo!())
+    }
 }
 
 fn declare_module_for_expansion(
@@ -366,17 +444,6 @@ fn declare_module_for_expansion(
     self_path: ResolvedModulePath,
     enclosing_self: Option<ResolvedModulePath>,
 ) -> Result<Ast, String> {
-    todo!()
-}
-
-fn resolve_provides(
-    expression_expanded_bodys: Vec<Ast>,
-    syntax: Ast,
-    require_and_provides: RequiresAndProvides,
-    phase: Phase,
-    self_path: ResolvedModulePath,
-    context: ExpandContext,
-) -> Result<Vec<Ast>, String> {
     todo!()
 }
 
