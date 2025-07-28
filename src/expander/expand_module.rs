@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     iter::{self},
     rc::Rc,
 };
@@ -8,6 +8,16 @@ use fallible_iterator::{self, convert, FallibleIterator};
 use itertools::{Either, Itertools};
 use matcher::{match_syntax, match_syntax_as};
 
+#[derive(Clone)]
+struct Pass1And2Loop {
+    context: ExpandContext,
+    module_namespace: NameSpace,
+    new_module_scopes: BTreeSet<Scope>,
+    inside_scope: Scope,
+    syntax: Ast,
+    self_path: ResolvedModulePath,
+    require_and_provides_clone: RequiresAndProvides,
+}
 use crate::{
     ast::{
         scope::{AdjustScope, Scope},
@@ -170,13 +180,15 @@ impl Expander {
                     let expression_expanded_bodys = this.pass_1_and_2_loop(
                         bodies,
                         phase,
-                        context.clone(),
-                        module_namespace.clone(),
-                        new_module_scopes.clone(),
-                        inside_scope,
-                        syntax.clone(),
-                        self_path.clone(),
-                        require_and_provides.clone(),
+                        Pass1And2Loop {
+                            context: context.clone(),
+                            module_namespace: module_namespace.clone(),
+                            new_module_scopes: new_module_scopes.clone(),
+                            inside_scope: inside_scope,
+                            syntax: syntax.clone(),
+                            self_path: self_path.clone(),
+                            require_and_provides_clone: require_and_provides.clone(),
+                        },
                     )?;
                     let fully_expanded_bodys_except_post_submodules = this.resolve_provides(
                         expression_expanded_bodys,
@@ -274,34 +286,30 @@ impl Expander {
         &mut self,
         bodies: impl Iterator<Item = Ast> + Clone + 'a,
         phase: Phase,
-        context: ExpandContext,
-        module_namespace: NameSpace,
-        new_module_scopes: BTreeSet<Scope>,
-        inside_scope: Scope,
-        syntax: Ast,
-        self_path: ResolvedModulePath,
-        require_and_provides_clone: RequiresAndProvides,
+        info: Pass1And2Loop,
         // -> impl Iterator<Item = Result<Ast, String>> {
         // wish i could just do this but require nested impl traits or the like, for contiunation
         // maybe
     ) -> Result<Vec<Ast>, String> {
+        let info_clone = info.clone();
         let partial_body_ctx = ExpandContext {
             context: Context::Module,
             phase,
-            namespace: module_namespace.clone(),
+            namespace: info.module_namespace.clone(),
             only_immediate: true,
-            post_expansion_scope: Some(inside_scope),
-            module_scopes: new_module_scopes,
-            ..context
+            post_expansion_scope: Some(info.inside_scope),
+            module_scopes: info.new_module_scopes,
+            ..info.context
         };
         let partially_expanded_bodies = self.partially_expand_bodys(
             bodies,
-            syntax,
+            info.syntax,
             phase,
             partial_body_ctx.clone(),
-            module_namespace,
-            self_path,
-            require_and_provides_clone,
+            info.module_namespace,
+            info.self_path,
+            info.require_and_provides_clone,
+            info_clone,
         )?;
         let body_ctx = ExpandContext {
             only_immediate: false,
@@ -325,7 +333,9 @@ impl Expander {
         module_namespace: NameSpace,
         self_path: ResolvedModulePath,
         require_and_provides_clone: RequiresAndProvides,
+        pass_1_and_2_loop_info: Pass1And2Loop,
     ) -> Result<Vec<Ast>, String> {
+        // let mut defined_symbols = HashMap::new();
         bodies
             // TODO: maybe make flat_map_ok = map + flatten_ok
             .map(move |body| {
@@ -342,9 +352,25 @@ impl Expander {
                                 module_namespace.clone(),
                                 self_path.clone(),
                                 require_and_provides_clone.clone(),
+                                pass_1_and_2_loop_info.clone(),
                             )
                         }
-                        "begin-for-syntax" => todo!(),
+                        "begin-for-syntax" => {
+                            let begin_for_syntax_m =
+                                match_syntax!((begin_for_syntax e ...))(expanded_body)?;
+                            let nested_bodies = self.pass_1_and_2_loop(
+                                begin_for_syntax_m.e.to_list_checked()?.into_iter(),
+                                phase,
+                                pass_1_and_2_loop_info.clone(),
+                            )?;
+                            self.eval_nested_bodies(
+                                nested_bodies.clone(),
+                                phase + Phase::Normal(1),
+                                module_namespace.clone(),
+                                self_path.clone(),
+                            )?;
+                            Ok(vec![rebuild(s.clone(), sexpr!((#(begin_for_syntax_m.begin_for_syntax) . #(nested_bodies.into_iter().fold(Ast::TheEmptyList, |_, _| todo!())))))])
+                        }
                         "define-values" => todo!(),
                         "define-syntaxes" => todo!(),
                         "#%require" => todo!(),
@@ -359,6 +385,15 @@ impl Expander {
             })
             .flatten_ok()
             .collect()
+    }
+    fn eval_nested_bodies(
+        &self,
+        nested_bodies: Vec<Ast>,
+        normal: Phase,
+        module_namespace: NameSpace,
+        self_path: ResolvedModulePath,
+    ) -> Result<(), String> {
+        todo!()
     }
     fn finish_expanding_body_expressions(
         &mut self,
