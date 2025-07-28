@@ -25,6 +25,7 @@ use crate::{
         Ast, Symbol,
     },
     expander::{
+        binding::{Binding, ModuleBinding},
         expand::rebuild,
         expand_requires::perform_initial_require,
         module_path::{build_module_name, ModulePath, SubModulePathElement},
@@ -335,7 +336,7 @@ impl Expander {
         require_and_provides_clone: RequiresAndProvides,
         pass_1_and_2_loop_info: Pass1And2Loop,
     ) -> Result<Vec<Ast>, String> {
-        // let mut defined_symbols = HashMap::new();
+        let mut defined_symbols = HashMap::new();
         bodies
             // TODO: maybe make flat_map_ok = map + flatten_ok
             .map(move |body| {
@@ -371,8 +372,26 @@ impl Expander {
                             )?;
                             Ok(vec![rebuild(s.clone(), sexpr!((#(begin_for_syntax_m.begin_for_syntax) . #(nested_bodies.into_iter().fold(Ast::TheEmptyList, |_, _| todo!())))))])
                         }
-                        "define-values" => todo!(),
-                        "define-syntaxes" => todo!(),
+                        "define-values" => Ok({
+                            let define_values_m = match_syntax!((define_values (id ...) rhs))(expanded_body.clone())?;
+                            let ids = self.remove_use_site_scopes(define_values_m.id, &partial_body_ctx);
+                            check_ids_unbound(ids.clone(), phase, require_and_provides_clone.clone())?;
+                            let syms = select_defined_symbols_and_bindings(ids, &mut defined_symbols, self_path.clone(), phase, require_and_provides_clone.clone())?;
+                            vec![expanded_body]
+
+                        }),
+                        "define-syntaxes" => Ok({
+                            let define_values_m = match_syntax!((define_syntaxes (id ...) rhs))(expanded_body)?;
+                            let ids = self.remove_use_site_scopes(define_values_m.id, &partial_body_ctx);
+                             check_ids_unbound(ids.clone(),phase, require_and_provides_clone.clone())?;
+                            let syms = select_defined_symbols_and_bindings(ids, &mut defined_symbols, self_path.clone(), phase, require_and_provides_clone.clone())?;
+                            let (values, rhs) = self.expand_and_eval_for_syntaxes_binding(define_values_m.rhs, syms.len(), partial_body_ctx.clone())?;
+                            syms.into_iter().zip(values).for_each(|(sym, val)| {
+                                // TODO: is there something wrong expand_and_eval_for_syntaxes_binding thats making incompatible types or something else
+                                module_namespace.namespace_set_transformer(phase, sym, val);
+                            });
+                            vec![rebuild(expanded_body, sexpr!((#(define_values_m.define_syntaxes) #(ids) #(rhs))))]
+                        }),
                         "#%require" => todo!(),
                         "#%provide" => todo!(),
                         "module" => todo!(),
@@ -468,6 +487,55 @@ impl Expander {
             .flatten_ok()
             .try_fold(Ast::TheEmptyList, |_, _: Result<Ast, String>| todo!())
     }
+}
+
+fn select_defined_symbols_and_bindings(
+    ids: Ast,
+    defined_symbols: &mut HashMap<String, Syntax<Symbol>>,
+    self_path: ResolvedModulePath,
+    phase: Phase,
+    require_and_provides_clone: RequiresAndProvides,
+) -> Result<Vec<Symbol>, String> {
+    ids.map_to_list_checked(|id| {
+        let id: Syntax<Symbol> = id.try_into()?;
+        let symbol = id.0 .0.to_string();
+        let local_symbol = iter::once(symbol.clone())
+            .chain((0..).map(move |i| format!("{}{i}", &symbol)))
+            .find(|id| !defined_symbols.contains_key(id))
+            .unwrap();
+        defined_symbols.insert(local_symbol.clone(), id.clone());
+        let local_sym: Symbol = Symbol(local_symbol.clone().into());
+        let module_binding = ModuleBinding {
+            from_module: self_path.clone(),
+            from_phase: phase,
+            from_symbol: local_sym.clone(),
+            nominal_from_module: self_path.clone(),
+            nominal_from_phase: phase,
+            nominal_from_symbol: local_sym.clone(),
+            nominal_require_phase: Phase::Normal(0),
+        };
+        let b = Binding::Module(module_binding.clone());
+        Expander::add_binding(id.clone(), phase, b)?;
+        require_and_provides_clone.add_defined_or_required_id(
+            id,
+            phase,
+            module_binding.clone(),
+            false,
+        );
+        Ok(local_sym)
+    })
+    .map_err(|e| e.unwrap_or("bad list".to_string()))
+}
+
+fn check_ids_unbound(
+    ids: Ast,
+    phase: Phase,
+    require_and_provides_clone: RequiresAndProvides,
+) -> Result<(), String> {
+    ids.foldl_pair(
+        |id, _, _| require_and_provides_clone.check_not_required_or_defined(&id.try_into()?, phase),
+        Ok(()),
+    )
 }
 
 fn declare_module_for_expansion(

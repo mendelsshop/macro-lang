@@ -448,7 +448,8 @@ impl Expander {
         )
     }
 
-    fn exxpand_and_eval_for_syntaxes_binding(
+    // flipped form original expander b/c of borrowing issues
+    pub fn expand_and_eval_for_syntaxes_binding(
         &mut self,
         rhs: Ast,
         id_count: usize,
@@ -471,7 +472,7 @@ impl Expander {
         id_count: usize,
         ctx: ExpandContext,
     ) -> Result<Vec<Ast>, String> {
-        self.exxpand_and_eval_for_syntaxes_binding(rhs, id_count, ctx)
+        self.expand_and_eval_for_syntaxes_binding(rhs, id_count, ctx)
             .map(|x| x.0)
     }
 
