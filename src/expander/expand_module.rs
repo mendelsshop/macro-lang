@@ -53,6 +53,13 @@ struct ResolveProvidesStruct {
     context: ExpandContext,
 }
 
+#[derive(Clone)]
+struct ExpandPostSubmodules {
+    syntax: Ast,
+    self_path: ResolvedModulePath,
+    submodule_context: ExpandContext,
+}
+
 impl Expander {
     pub fn core_form_module(&mut self, syntax: Ast, context: ExpandContext) -> Result<Ast, String> {
         if context.context != Context::TopLevel {
@@ -214,7 +221,7 @@ impl Expander {
                         module_scopes: new_module_scopes,
                         ..context
                     };
-                    let declare_enclosing_module = {
+                    let mut declare_enclosing_module = {
                         let fully_expanded_bodys_except_post_submodules =
                             fully_expanded_bodys_except_post_submodules.clone();
                         let self_path = self_path.clone();
@@ -233,11 +240,13 @@ impl Expander {
                     };
                     let fully_expanded_bodys = this.expand_post_submodules(
                         fully_expanded_bodys_except_post_submodules,
-                        declare_enclosing_module,
-                        syntax,
                         phase,
-                        self_path,
-                        submodule_context,
+                        &mut declare_enclosing_module,
+                        ExpandPostSubmodules {
+                            syntax: syntax,
+                            self_path: self_path,
+                            submodule_context: submodule_context,
+                        },
                     )?;
                     Ok(rebuild(
                         module_begin,
@@ -511,19 +520,53 @@ impl Expander {
     fn expand_post_submodules(
         &mut self,
         fully_expanded_bodys_except_post_submodules: Vec<Ast>,
-        declare_enclosing_module: impl FnMut() -> Result<Ast, String>,
-        syntax: Ast,
         phase: Phase,
-        self_path: ResolvedModulePath,
-        submodule_context: ExpandContext,
+        declare_enclosing_module: &mut impl FnMut() -> Result<Ast, String>,
+        info: ExpandPostSubmodules,
     ) -> Result<Ast, String> {
         fully_expanded_bodys_except_post_submodules
             .into_iter()
             .map(move |body| {
                 if let Ok(sym) = Self::core_form_symbol(body.clone(), phase) {
                     match &*sym.0 {
-                        "module*" => todo!(),
-                        "begin-for-syntax" => todo!(),
+                        "module*" => {
+                            // [(try-match-syntax (car bodys) '(module* name #f . _))
+                            if match_syntax!((module name r#false . _i))(body.clone())
+                                .is_ok_and(|m| m.r#false == Ast::Boolean(false))
+                            {
+                                let neg_phase = Phase::Normal(0) - phase;
+                                let shifted_s = body.syntax_shift_phase_level(neg_phase);
+                                let submodule = self
+                                    .expand_submodule(
+                                        shifted_s,
+                                        info.self_path.clone(),
+                                        info.submodule_context.clone(),
+                                    )?
+                                    .into_iter()
+                                    .fold(Ast::TheEmptyList, |_, _| todo!());
+                                Ok(vec![submodule.syntax_shift_phase_level(phase)])
+                            } else {
+                                self.expand_submodule(
+                                    body,
+                                    info.self_path.clone(),
+                                    info.submodule_context.clone(),
+                                )
+                            }
+                        }
+                        "begin-for-syntax" => {
+                            let begin_for_syntax_m =
+                                match_syntax!((begin_for_syntax e ...))(body.clone())?;
+                            let nested_bodies = self.expand_post_submodules(
+                                begin_for_syntax_m.e.to_list(),
+                                phase + Phase::Normal(1),
+                                declare_enclosing_module,
+                                info.clone(),
+                            )?;
+                            Ok(vec![rebuild(
+                                body,
+                                sexpr!((#(begin_for_syntax_m.begin_for_syntax) . #(nested_bodies))),
+                            )])
+                        }
                         _ => Ok(vec![body]),
                     }
                 } else {

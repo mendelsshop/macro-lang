@@ -281,6 +281,7 @@ pub fn match_syntax_as(input: TokenStream) -> TokenStream {
     }
     .into()
 }
+// TODO: #t/#f literals and _
 #[proc_macro]
 pub fn match_syntax(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as SExpr);
