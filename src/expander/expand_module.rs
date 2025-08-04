@@ -27,7 +27,7 @@ use crate::{
     expander::{
         binding::{Binding, ModuleBinding},
         expand::rebuild,
-        expand_requires::perform_initial_require,
+        expand_requires::{parse_and_perform_requires, perform_initial_require},
         module_path::{build_module_name, ModulePath, SubModulePathElement},
         require_and_provide::RequiresAndProvides,
     },
@@ -45,6 +45,14 @@ use super::{
 // TODO: match_syntax!( (#%module_begin body ...))
 match_syntax_as!(ModuleBeginMatcher as (module_begin body ...));
 match_syntax_as!(ModuleMatcher as (module module_name:id initial_require body ...));
+#[derive(Clone)]
+struct ResolveProvidesStruct {
+    syntax: Ast,
+    require_and_provides: RequiresAndProvides,
+    self_path: ResolvedModulePath,
+    context: ExpandContext,
+}
+
 impl Expander {
     pub fn core_form_module(&mut self, syntax: Ast, context: ExpandContext) -> Result<Ast, String> {
         if context.context != Context::TopLevel {
@@ -193,11 +201,13 @@ impl Expander {
                     )?;
                     let fully_expanded_bodys_except_post_submodules = this.resolve_provides(
                         expression_expanded_bodys,
-                        syntax.clone(),
-                        require_and_provides.clone(),
                         phase,
-                        self_path.clone(),
-                        context.clone(),
+                        ResolveProvidesStruct {
+                            syntax: syntax.clone(),
+                            require_and_provides: require_and_provides.clone(),
+                            self_path: self_path.clone(),
+                            context: context.clone(),
+                        },
                     )?;
                     let submodule_context = ExpandContext {
                         namespace: module_namespace.clone(),
@@ -381,21 +391,27 @@ impl Expander {
 
                         }),
                         "define-syntaxes" => Ok({
-                            let define_values_m = match_syntax!((define_syntaxes (id ...) rhs))(expanded_body)?;
-                            let ids = self.remove_use_site_scopes(define_values_m.id, &partial_body_ctx);
+                            let define_syntaxes_m = match_syntax!((define_syntaxes (id ...) rhs))(expanded_body.clone())?;
+                            let ids = self.remove_use_site_scopes(define_syntaxes_m.id, &partial_body_ctx);
                              check_ids_unbound(ids.clone(),phase, require_and_provides_clone.clone())?;
-                            let syms = select_defined_symbols_and_bindings(ids, &mut defined_symbols, self_path.clone(), phase, require_and_provides_clone.clone())?;
-                            let (values, rhs) = self.expand_and_eval_for_syntaxes_binding(define_values_m.rhs, syms.len(), partial_body_ctx.clone())?;
+                            let syms = select_defined_symbols_and_bindings(ids.clone(), &mut defined_symbols, self_path.clone(), phase, require_and_provides_clone.clone())?;
+                            let (values, rhs) = self.expand_and_eval_for_syntaxes_binding(define_syntaxes_m.rhs, syms.len(), partial_body_ctx.clone())?;
                             syms.into_iter().zip(values).for_each(|(sym, val)| {
                                 // TODO: is there something wrong expand_and_eval_for_syntaxes_binding thats making incompatible types or something else
-                                module_namespace.namespace_set_transformer(phase, sym, val);
+                                // module_namespace.namespace_set_transformer(phase, sym, val);
+                                todo!()
                             });
-                            vec![rebuild(expanded_body, sexpr!((#(define_values_m.define_syntaxes) #(ids) #(rhs))))]
+                            vec![rebuild(expanded_body, sexpr!((#(define_syntaxes_m.define_syntaxes) #(ids) #(rhs))))]
                         }),
-                        "#%require" => todo!(),
-                        "#%provide" => todo!(),
-                        "module" => todo!(),
-                        "module*" => todo!(),
+                        "#%require" => Ok({
+                            let ready_body = self.remove_use_site_scopes(expanded_body.clone(), &partial_body_ctx);
+                            let require_m = match_syntax!((require req ...))(ready_body)?;
+                            parse_and_perform_requires(require_m.req, Some(self_path.clone()), &module_namespace, phase, &require_and_provides_clone, false)?;
+                            vec![expanded_body]
+                        }),
+                        "#%provide" => Ok(vec![expanded_body]),
+                        "module" => self.expand_submodule(expanded_body, self_path.clone(), partial_body_ctx.clone()),
+                        "module*" => Ok(vec![expanded_body]),
                         _ => Ok(vec![expanded_body]),
                     }
                 } else {
@@ -405,6 +421,16 @@ impl Expander {
             .flatten_ok()
             .collect()
     }
+
+    fn expand_submodule(
+        &self,
+        expanded_body: Ast,
+        self_path: ResolvedModulePath,
+        partial_body_ctx: ExpandContext,
+    ) -> Result<Vec<Ast>, String> {
+        todo!()
+    }
+
     fn eval_nested_bodies(
         &self,
         nested_bodies: Vec<Ast>,
@@ -418,20 +444,27 @@ impl Expander {
         &mut self,
         partially_expanded_bodys: Vec<Ast>,
         phase: Phase,
-        partial_body_ctx: ExpandContext,
+        body_ctx: ExpandContext,
     ) -> Result<Vec<Ast>, String> {
         partially_expanded_bodys
             .into_iter()
             .map(move |body| {
                 if let Ok(sym) = Self::core_form_symbol(body.clone(), phase) {
                     match &*sym.0 {
-                        "define-values" => todo!(),
+                        "define-values" => {
+                            let define_values_m =
+                                match_syntax!((define_values (id ...) rhs))(body.clone())?;
+                            let expanded_rhs = self.expand(define_values_m.rhs, body_ctx.clone())?;
+                            Ok(vec![rebuild(body, sexpr!((#(define_values_m.define_values) #(define_values_m.id) #(expanded_rhs))))])
+                        }
                         "define-syntaxes" | "#%require" | "#%provide" | "begin-for-syntax"
-                        | "module" | "module*" => todo!(),
-                        _ => Ok(vec![body]),
+                        | "module" | "module*" => Ok(vec![body]),
+                        _ => Ok(vec![self.expand(body, body_ctx.clone())?]),
                     }
                 } else {
-                    Ok(vec![self.expand(body, partial_body_ctx.clone())?])
+                    // TODO: only if because not core symbol, but if its cause resolve failed than
+                    // just propagate the error
+                    Ok(vec![self.expand(body, body_ctx.clone())?])
                 }
             })
             .flatten_ok()
@@ -440,19 +473,32 @@ impl Expander {
     fn resolve_provides(
         &mut self,
         expression_expanded_bodys: Vec<Ast>,
-        syntax: Ast,
-        require_and_provides: RequiresAndProvides,
         phase: Phase,
-        self_path: ResolvedModulePath,
-        context: ExpandContext,
+        info: ResolveProvidesStruct,
     ) -> Result<Vec<Ast>, String> {
         expression_expanded_bodys
             .into_iter()
             .map(move |body| {
                 if let Ok(sym) = Self::core_form_symbol(body.clone(), phase) {
                     match &*sym.0 {
-                        "#%provide" => todo!(),
-                        "begin-for-syntax" => todo!(),
+                        "#%provide" => {
+                            let provide_m = match_syntax!((provide spec))(body.clone())?;
+                            let specs = self.parse_and_expand_provides(provide_m.spec, &info.require_and_provides, Some(info.self_path.clone()), phase, info.context.clone())?;
+                            // TODO: @ before specs: 
+                            // (rebuild (car bodys)
+                            // `(,(m '#%provide) ,@specs))
+                            Ok(vec![rebuild(body, sexpr!((#(provide_m.provide) #(specs) )))])
+                        },
+                        "begin-for-syntax" => {
+                            let begin_for_syntax_m =
+                                match_syntax!((begin_for_syntax e ...))(body.clone())?;
+                            let nested_bodies = self.resolve_provides(
+                            begin_for_syntax_m.e.to_list(),
+                                phase + Phase::Normal(1),
+                                info.clone()
+                            )?;
+                            Ok(vec![rebuild(body, sexpr!((#(begin_for_syntax_m.begin_for_syntax) . #(nested_bodies.into_iter().fold(Ast::TheEmptyList, |_, _| todo!())))))])
+                        },
                         _ => Ok(vec![body]),
                     }
                 } else {
