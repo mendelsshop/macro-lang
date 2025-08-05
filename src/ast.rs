@@ -44,6 +44,7 @@ pub enum Function {
 /// ; for dot
 /// do mbe limitations each item in list must be delimeted by , unless its followed by ; or the
 /// last thing in a list
+/// maybe need list splicer
 macro_rules! sexpr {
     (@list) => {$crate::ast::Ast::TheEmptyList};
     (()) => {$crate::ast::Ast::TheEmptyList};

@@ -255,7 +255,7 @@ impl Expander {
                 },
             )
         };
-        let module_begin = ensure_module_begin(
+        let module_begin = self.ensure_module_begin(
             bodies,
             inside_scope,
             new_module_scopes.clone(),
@@ -576,6 +576,77 @@ impl Expander {
             .flatten_ok()
             .try_fold(Ast::TheEmptyList, |_, _: Result<Ast, String>| todo!())
     }
+    fn ensure_module_begin(
+        &mut self,
+        bodies: Ast,
+        inside_scope: Scope,
+        new_module_scopes: BTreeSet<Scope>,
+        context: ExpandContext,
+        phase: Phase,
+        syntax: Ast,
+    ) -> Result<Ast, String> {
+        match bodies {
+            Ast::Pair(p) => {
+                // TODO: only if it resolves
+                Self::core_form_symbol(p.1.clone(), phase)
+                    .ok()
+                    .filter(|sym| &*sym.0 == "#%module-begin")
+                    .map_or_else(
+                        || {
+                            let partially_expanded_bodies = self.expand(
+                                p.1.clone(),
+                                ExpandContext {
+                                    module_scopes: new_module_scopes.clone(),
+                                    context: Context::ModuleBegin,
+                                    only_immediate: true,
+                                    post_expansion_scope: Some(inside_scope),
+                                    ..context
+                                },
+                            )?;
+                            Self::core_form_symbol(partially_expanded_bodies.clone(), phase)
+                                .ok()
+                                .filter(|sym| &*sym.0 == "#%module-begin")
+                                .map_or_else(
+                                    || {
+                                        add_module_begin(
+                                            sexpr!((#(partially_expanded_bodies.clone()))),
+                                            syntax,
+                                            new_module_scopes,
+                                            phase,
+                                        )
+                                    },
+                                    |_| Ok(partially_expanded_bodies.clone()),
+                                )
+                        },
+                        |_| Ok(p.1.clone()),
+                    )
+            }
+            _ => add_module_begin(bodies, syntax, new_module_scopes, phase),
+        }
+    }
+}
+
+fn add_module_begin(
+    bodies: Ast,
+    syntax: Ast,
+    new_module_scopes: BTreeSet<Scope>,
+    phase: Phase,
+) -> Result<Ast, String> {
+    let module_begin_id = Ast::Symbol("#%module-begin".into())
+        .datum_to_syntax(None, None, None, None)
+        .add_scopes(new_module_scopes.into_iter());
+    Expander::resolve(&module_begin_id.clone().try_into()?, phase, false)
+        .map(|_| {
+            rebuild(
+                syntax.clone(),
+                // TODO: maybe need list splicing
+                // (rebuild
+                //  s
+                // `(,mb-id ,@bodys)))
+                sexpr!((#(module_begin_id) . #(bodies))),
+            )
+        })
+        .map_err(|_| format!("no #%module-begin binding found in the module's language {syntax}"))
 }
 
 fn select_defined_symbols_and_bindings(
@@ -635,17 +706,6 @@ fn declare_module_for_expansion(
     module_namespace: NameSpace,
     self_path: ResolvedModulePath,
     enclosing_self: Option<ResolvedModulePath>,
-) -> Result<Ast, String> {
-    todo!()
-}
-
-fn ensure_module_begin(
-    bodies: Ast,
-    inside_scope: Scope,
-    new_module_scopes: BTreeSet<Scope>,
-    context: ExpandContext,
-    phase: Phase,
-    syntax: Ast,
 ) -> Result<Ast, String> {
     todo!()
 }

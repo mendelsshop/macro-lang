@@ -237,6 +237,9 @@ pub trait AdjustScope: Sized {
             }),
         )
     }
+    fn add_scopes(self, i: impl Iterator<Item = Scope>) -> Self {
+        i.into_iter().fold(self, AdjustScope::add_scope)
+    }
 
     fn flip_scope(self, other_scope: Scope) -> Self {
         self.adjust_scope(
