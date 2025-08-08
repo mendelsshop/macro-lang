@@ -226,8 +226,8 @@ impl Expander {
                             fully_expanded_bodys_except_post_submodules.clone();
                         let self_path = self_path.clone();
                         let module_begin_m = module_begin_m.clone();
-                        move || {
-                            declare_module_for_expansion(
+                        move |this: &Self| {
+                            this.declare_module_for_expansion(
                                 fully_expanded_bodys_except_post_submodules.clone(),
                                 m.clone(),
                                 module_begin_m.clone(),
@@ -432,12 +432,26 @@ impl Expander {
     }
 
     fn expand_submodule(
-        &self,
-        expanded_body: Ast,
+        &mut self,
+        submodule: Ast,
         self_path: ResolvedModulePath,
-        partial_body_ctx: ExpandContext,
+        ctx: ExpandContext,
     ) -> Result<Vec<Ast>, String> {
-        todo!()
+        let submodule = self.expand_module(
+            submodule,
+            ExpandContext {
+                context: Context::Module,
+                only_immediate: false,
+                post_expansion_scope: None,
+                ..ctx.clone()
+            },
+            Some(self_path.clone()),
+            Phase::Label,
+        )?;
+        let ns = ctx.namespace;
+        // TODO: parameterize
+        self.run_time_eval_single(self.compile_module(submodule, &ns, Some(self_path), true)?);
+        Ok(submodule)
     }
 
     fn eval_nested_bodies(
@@ -521,7 +535,7 @@ impl Expander {
         &mut self,
         fully_expanded_bodys_except_post_submodules: Vec<Ast>,
         phase: Phase,
-        declare_enclosing_module: &mut impl FnMut() -> Result<Ast, String>,
+        declare_enclosing_module: &mut impl FnMut(&Self) -> Result<Ast, String>,
         info: ExpandPostSubmodules,
     ) -> Result<Ast, String> {
         fully_expanded_bodys_except_post_submodules
@@ -530,6 +544,7 @@ impl Expander {
                 if let Ok(sym) = Self::core_form_symbol(body.clone(), phase) {
                     match &*sym.0 {
                         "module*" => {
+                            declare_enclosing_module(self);
                             // [(try-match-syntax (car bodys) '(module* name #f . _))
                             if match_syntax!((module name r#false . _i))(body.clone())
                                 .is_ok_and(|m| m.r#false == Ast::Boolean(false))
@@ -624,6 +639,33 @@ impl Expander {
             _ => add_module_begin(bodies, syntax, new_module_scopes, phase),
         }
     }
+    fn declare_module_for_expansion(
+        &self,
+        fully_expanded_bodys_except_post_submodules: Vec<Ast>,
+        m: ModuleMatcher,
+        module_begin_m: ModuleBeginMatcher,
+        require_and_provides: RequiresAndProvides,
+        module_namespace: NameSpace,
+        self_path: ResolvedModulePath,
+        enclosing_self: Option<ResolvedModulePath>,
+    ) -> Result<Ast, String> {
+        let temp_module = require_and_provides.attach_require_provide_properties(
+            sexpr!((
+                    #(Ast::Symbol("module".into()).datum_to_syntax(Some(self.core_syntax.1.clone()),Some( self.core_syntax.2.clone()), None,None))
+                    #(m.module_name_id)
+                    #(m.initial_require)
+                    (#(module_begin_m.module_begin) . #(fully_expanded_bodys_except_post_submodules.iter().fold(Ast::TheEmptyList, |_, _| todo!())))
+                ))
+            .datum_to_syntax(None, None, None, None),
+            self_path,
+        );
+        self.run_time_eval_single(self.compile_module(
+            temp_module,
+            &module_namespace,
+            enclosing_self,
+            true,
+        )?)
+    }
 }
 
 fn add_module_begin(
@@ -696,16 +738,4 @@ fn check_ids_unbound(
         |id, _, _| require_and_provides_clone.check_not_required_or_defined(&id.try_into()?, phase),
         Ok(()),
     )
-}
-
-fn declare_module_for_expansion(
-    fully_expanded_bodys_except_post_submodules: Vec<Ast>,
-    m: ModuleMatcher,
-    module_begin_m: ModuleBeginMatcher,
-    require_and_provides: RequiresAndProvides,
-    module_namespace: NameSpace,
-    self_path: ResolvedModulePath,
-    enclosing_self: Option<ResolvedModulePath>,
-) -> Result<Ast, String> {
-    todo!()
 }

@@ -29,7 +29,7 @@ impl Expander {
                 let core_sym = Expander::core_form_symbol(s.clone(), phase)
                     .map_err(|_| format!("not a core form {s}"))?;
                 match core_sym.to_string().as_str() {
-                    "module" | "module*" => self.compile_module(s, ns, self_name),
+                    "module" | "module*" => self.compile_module(s, ns, self_name, false),
                     "#%require" => todo!(),
                     "lambda" => {
                         let m = match_syntax!(
@@ -155,11 +155,13 @@ impl Expander {
             _ => Err(format!("bad syntax after expansion {s} compile")),
         }
     }
-    fn compile_module(
+    /// as_sumbodule: false
+    pub fn compile_module(
         &self,
         s: Ast,
         ns: &NameSpace,
         self_name: Option<ResolvedModulePath>,
+        as_sumbodule: bool,
     ) -> Result<Ast, String> {
         todo!()
     }
