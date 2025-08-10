@@ -124,8 +124,8 @@ macro_rules! make_let_values_form {
                 .0
                 .extend(trans_keyss.into_iter().zip(trans_valss.concat()));
             let letrec_values_id = ($letrecvalues)(m, self);
-            let val_idss = list_to_cons(val_idss.into_iter(), |ids| {
-                list_to_cons(ids.into_iter(), |x| {
+            let val_idss = Ast::map_list_to_cons(val_idss.into_iter(), |ids| {
+                Ast::map_list_to_cons(ids.into_iter(), |x| {
                     Ast::Syntax(Box::new(x.clone().with(Ast::Symbol(x.0))))
                 })
             });
@@ -149,10 +149,7 @@ macro_rules! make_let_values_form {
         }
     };
 }
-fn list_to_cons<T>(list: impl DoubleEndedIterator<Item = T>, mut f: impl FnMut(T) -> Ast) -> Ast {
-    list.into_iter()
-        .rfold(Ast::TheEmptyList, |rest, current| list!(f(current); rest))
-}
+
 impl Expander {
     fn add_local_bindings(&mut self, ids: Vec<Syntax<Symbol>>) -> Vec<Symbol> {
         ids.into_iter()

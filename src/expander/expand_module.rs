@@ -389,7 +389,7 @@ impl Expander {
                                 module_namespace.clone(),
                                 self_path.clone(),
                             )?;
-                            Ok(vec![rebuild(s.clone(), sexpr!((#(begin_for_syntax_m.begin_for_syntax) . #(nested_bodies.into_iter().fold(Ast::TheEmptyList, |_, _| todo!())))))])
+                            Ok(vec![rebuild(s.clone(), sexpr!((#(begin_for_syntax_m.begin_for_syntax) . #(Ast::list_to_cons(nested_bodies.into_iter())))))])
                         }
                         "define-values" => Ok({
                             let define_values_m = match_syntax!((define_values (id ...) rhs))(expanded_body.clone())?;
@@ -520,7 +520,7 @@ impl Expander {
                                 phase + Phase::Normal(1),
                                 info.clone()
                             )?;
-                            Ok(vec![rebuild(body, sexpr!((#(begin_for_syntax_m.begin_for_syntax) . #(nested_bodies.into_iter().fold(Ast::TheEmptyList, |_, _| todo!())))))])
+                            Ok(vec![rebuild(body, sexpr!((#(begin_for_syntax_m.begin_for_syntax) . #(Ast::list_to_cons(nested_bodies.into_iter())))))])
                         },
                         _ => Ok(vec![body]),
                     }
@@ -551,14 +551,14 @@ impl Expander {
                             {
                                 let neg_phase = Phase::Normal(0) - phase;
                                 let shifted_s = body.syntax_shift_phase_level(neg_phase);
-                                let submodule = self
-                                    .expand_submodule(
+                                let submodule = Ast::list_to_cons(
+                                    self.expand_submodule(
                                         shifted_s,
                                         info.self_path.clone(),
                                         info.submodule_context.clone(),
                                     )?
-                                    .into_iter()
-                                    .fold(Ast::TheEmptyList, |_, _| todo!());
+                                    .into_iter(),
+                                );
                                 Ok(vec![submodule.syntax_shift_phase_level(phase)])
                             } else {
                                 self.expand_submodule(
@@ -654,7 +654,7 @@ impl Expander {
                     #(Ast::Symbol("module".into()).datum_to_syntax(Some(self.core_syntax.1.clone()),Some( self.core_syntax.2.clone()), None,None))
                     #(m.module_name_id)
                     #(m.initial_require)
-                    (#(module_begin_m.module_begin) . #(fully_expanded_bodys_except_post_submodules.iter().fold(Ast::TheEmptyList, |_, _| todo!())))
+                    (#(module_begin_m.module_begin) . #(Ast::list_to_cons( fully_expanded_bodys_except_post_submodules.into_iter())))
                 ))
             .datum_to_syntax(None, None, None, None),
             self_path,

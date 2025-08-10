@@ -294,6 +294,16 @@ impl fmt::Display for Ast {
 }
 
 impl Ast {
+    pub fn map_list_to_cons<T>(
+        list: impl DoubleEndedIterator<Item = T>,
+        mut f: impl FnMut(T) -> Ast,
+    ) -> Ast {
+        list.into_iter()
+            .rfold(Ast::TheEmptyList, |rest, current| list!(f(current); rest))
+    }
+    pub fn list_to_cons(list: impl DoubleEndedIterator<Item = Ast>) -> Ast {
+        Self::map_list_to_cons(list, |x| x)
+    }
     #[must_use]
     pub fn size(&self) -> usize {
         match self {
